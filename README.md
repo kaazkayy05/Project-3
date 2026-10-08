@@ -1,5 +1,5 @@
 # Project-3
-TEAM 3 - Echolocation Game
+TEAM 3 - Echoes of Home
 
 **Kayla Cobb**: Sanity / Breath Control System
 
