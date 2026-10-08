@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://bmnkrrm3h75w7"]
+
+[ext_resource type="Script" uid="uid://d0dx6vfln1ci6" path="res://systems/acoustic_pulse/test_acoustic_pulse.gd" id="1_au0x3"]
+
+[node name="Node" type="Node" unique_id=1434423579]
+script = ExtResource("1_au0x3")
