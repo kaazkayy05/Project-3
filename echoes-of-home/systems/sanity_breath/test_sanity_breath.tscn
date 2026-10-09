@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://csomtog2840b7"]
+
+[ext_resource type="Script" uid="uid://bkmq5ruwjiitc" path="res://systems/sanity_breath/test_sanity_breath.gd" id="1_5t1ne"]
+
+[node name="TestSanityBreath" type="Node" unique_id=1259753281]
+script = ExtResource("1_5t1ne")
