@@ -6,6 +6,7 @@ var sanity_breath: Node
 var breath_label: Label
 var breath_bar: ProgressBar
 var breath_locked: bool = false
+var breath_system: Node
 var creak: AudioStreamPlayer3D
 var camera: Camera3D
 var step_distance: float = 0.0
@@ -13,6 +14,7 @@ var pulse_requested: bool = false
 var interaction_requested: bool = false
 var interaction_hint: String = ""
 var message: String = "Find the brass key downstairs."
+var controls_enabled: bool = true
 
 func _ready() -> void:
 	var shape := CollisionShape3D.new()
@@ -61,6 +63,8 @@ func _ready() -> void:
 	hud.add_child(breath_bar)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if not controls_enabled:
+		return
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		rotate_y(-event.relative.x * 0.002)
 		camera.rotation.x = clampf(camera.rotation.x - event.relative.y * 0.002, -1.4, 1.4)
@@ -74,16 +78,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
-	if environment_system.has_escaped:
+	if not controls_enabled or environment_system.has_escaped:
+		velocity = Vector3.ZERO
+		if is_instance_valid(breath_system):
+			breath_system.call("release_breath")
 		return
-			# Hold right-click to hold breath
-	var right_click_pressed = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
-
-	if not right_click_pressed:
-		breath_locked = false
-		sanity_breath.release_breath()
-	elif not breath_locked:
-		sanity_breath.hold_breath()
+	_update_breath_input()
 	var direction := Vector3(
 		float(Input.is_physical_key_pressed(KEY_D)) - float(Input.is_physical_key_pressed(KEY_A)),
 		0.0, float(Input.is_physical_key_pressed(KEY_S)) - float(Input.is_physical_key_pressed(KEY_W)))
@@ -114,6 +114,25 @@ func _physics_process(delta: float) -> void:
 		interaction_requested = false
 		if action != &"":
 			message = environment_system.interact(action)
+
+
+func _update_breath_input() -> void:
+	if not is_instance_valid(breath_system):
+		return
+	if Input.is_physical_key_pressed(KEY_CTRL):
+		breath_system.call("hold_breath")
+	else:
+		breath_system.call("release_breath")
+
+
+func set_controls_enabled(enabled: bool) -> void:
+	controls_enabled = enabled
+	if not controls_enabled:
+		velocity = Vector3.ZERO
+		pulse_requested = false
+		interaction_requested = false
+		if is_instance_valid(breath_system):
+			breath_system.call("release_breath")
 
 func aimed_interaction() -> StringName:
 	var query := PhysicsRayQueryParameters3D.create(camera.global_position,

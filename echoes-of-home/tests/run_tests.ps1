@@ -11,5 +11,6 @@ function Invoke-GodotCheck([string[]]$EngineArgs) {
 Invoke-GodotCheck @('--headless', '--path', $project, '--editor', '--import', '--quit')
 Invoke-GodotCheck @('--headless', '--path', $project, '--script', 'res://tests/test_environment.gd')
 Invoke-GodotCheck @('--headless', '--path', $project, '--script', 'res://tests/test_house.gd')
+Invoke-GodotCheck @('--headless', '--path', $project, '--script', 'res://tests/test_monster_ai.gd')
 Invoke-GodotCheck @('--headless', '--path', $project, 'res://systems/acoustic_pulse/node.tscn', '--quit-after', '5')
 Write-Host 'All checks completed successfully.'
