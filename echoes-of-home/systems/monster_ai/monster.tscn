@@ -1,0 +1,91 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://systems/monster_ai/monster_ai.gd" id="1_monster"]
+[ext_resource type="Script" path="res://systems/monster_ai/monster_echo_visual.gd" id="2_visual"]
+[ext_resource type="Shader" path="res://systems/monster_ai/monster_echo.gdshader" id="3_echo"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_monster"]
+radius = 0.3
+height = 1.7
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_echo"]
+resource_local_to_scene = true
+shader = ExtResource("3_echo")
+shader_parameter/pulse_origin = Vector3(0, 0, 0)
+shader_parameter/pulse_radius = 0.0
+shader_parameter/pulse_active = false
+shader_parameter/reveal_trail_distance = 5.0
+shader_parameter/echo_color = Color(0.933333, 0.94902, 0.968627, 1)
+shader_parameter/grid_scale = 9.0
+
+[sub_resource type="SphereMesh" id="SphereMesh_head"]
+radius = 0.18
+height = 0.36
+radial_segments = 16
+rings = 8
+
+[sub_resource type="BoxMesh" id="BoxMesh_torso"]
+size = Vector3(0.5, 0.76, 0.26)
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_arm"]
+radius = 0.075
+height = 0.86
+radial_segments = 10
+rings = 4
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_leg"]
+radius = 0.09
+height = 0.8
+radial_segments = 10
+rings = 4
+
+[node name="Monster" type="CharacterBody3D"]
+script = ExtResource("1_monster")
+use_house_patrol_route = true
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+position = Vector3(0, 0.85, 0)
+shape = SubResource("CapsuleShape3D_monster")
+
+[node name="NavigationAgent3D" type="NavigationAgent3D" parent="."]
+path_desired_distance = 0.25
+target_desired_distance = 0.25
+radius = 0.3
+height = 1.7
+
+[node name="EchoVisual" type="Node3D" parent="."]
+visible = false
+script = ExtResource("2_visual")
+echo_material = SubResource("ShaderMaterial_echo")
+
+[node name="Head" type="MeshInstance3D" parent="EchoVisual"]
+position = Vector3(0, 1.61, 0)
+material_override = SubResource("ShaderMaterial_echo")
+mesh = SubResource("SphereMesh_head")
+
+[node name="Torso" type="MeshInstance3D" parent="EchoVisual"]
+position = Vector3(0, 1.12, 0)
+material_override = SubResource("ShaderMaterial_echo")
+mesh = SubResource("BoxMesh_torso")
+
+[node name="LeftArm" type="MeshInstance3D" parent="EchoVisual"]
+position = Vector3(-0.34, 1.05, 0)
+rotation = Vector3(0, 0, -0.12)
+material_override = SubResource("ShaderMaterial_echo")
+mesh = SubResource("CapsuleMesh_arm")
+
+[node name="RightArm" type="MeshInstance3D" parent="EchoVisual"]
+position = Vector3(0.34, 1.05, 0)
+rotation = Vector3(0, 0, 0.12)
+material_override = SubResource("ShaderMaterial_echo")
+mesh = SubResource("CapsuleMesh_arm")
+
+[node name="LeftLeg" type="MeshInstance3D" parent="EchoVisual"]
+position = Vector3(-0.14, 0.4, 0)
+material_override = SubResource("ShaderMaterial_echo")
+mesh = SubResource("CapsuleMesh_leg")
+
+[node name="RightLeg" type="MeshInstance3D" parent="EchoVisual"]
+position = Vector3(0.14, 0.4, 0)
+material_override = SubResource("ShaderMaterial_echo")
+mesh = SubResource("CapsuleMesh_leg")
