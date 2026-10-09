@@ -40,3 +40,14 @@ Location: Upstairs Hallway (outside the linen closet)
 Rules in Play: Rule 1 (Ghost Coordinate), Rule 2 (Resonance Amplification), Rule 3 (Gasp Response)
 You run out of steps in the dark and fire an echo to find the stairs. The pulse illuminates the hallway—and reveals the monster standing inches from your face.
 You scramble back toward the linen closet, but your foot hits bare hardwood, triggering a loud resonance spike (Rule 2) while the monster charges the doorway you just pulsed from (Rule 1). You dive inside the closet and hold your breath. The screen fades to black, and the monster stops right in the open doorway, inches away, sniffing the air—leaving you pinned and praying your lung meter doesn't run out before it turns around (Rule 3).
+
+## Playable environment system (Samaii)
+
+Open `echoes-of-home/project.godot` with Godot 4.3 to run the fixed two-story
+house blockout. WASD/mouse move and look, Space pulses, E interacts, Shift sprints,
+and F6 while playing toggles the resonance freeze test.
+
+See [Environment implementation, integration, and test results](docs/ENVIRONMENT_SYSTEM.md)
+for the four floor types, key/deadbolt escape loop, optional chain, controller
+integration, validation commands, and limits of the currently available team systems.
+Kai's acoustic implementation and original test scene remain unchanged.
