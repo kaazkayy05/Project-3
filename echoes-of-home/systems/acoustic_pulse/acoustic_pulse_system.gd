@@ -18,8 +18,8 @@ signal pulse_ended()
 @export_group("Pulse Tuning")
 @export var max_pulse_charges: int = 5
 @export var pulse_recharge_time: float = 6.0
-@export var base_pulse_radius: float = 12.0
-@export var base_pulse_speed: float = 18.0
+@export var base_pulse_radius: float = 24.0
+@export var base_pulse_speed: float = 14.0
 
 var pulse_charges: int = 5
 var is_pulse_active: bool = false
