@@ -2,6 +2,10 @@ extends CharacterBody3D
 ## Demo adapter only. Replace with the team's controller when it is available.
 var environment_system: HouseEnvironmentSystem
 var acoustic: AcousticPulseSystem
+var sanity_breath: Node
+var breath_label: Label
+var breath_bar: ProgressBar
+var breath_locked: bool = false
 var creak: AudioStreamPlayer3D
 var camera: Camera3D
 var step_distance: float = 0.0
@@ -28,6 +32,33 @@ func _ready() -> void:
 	add_child(creak)
 	floor_snap_length = 0.3
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		# Create the breathing system
+	sanity_breath = preload(
+		"res://systems/sanity_breath/sanity_breath_system.gd"
+	).new()
+
+	sanity_breath.name = "SanityBreath"
+	add_child(sanity_breath)
+
+	sanity_breath.gasp_triggered.connect(on_player_gasp)
+
+	# Create the breathing HUD
+	var hud = CanvasLayer.new()
+	add_child(hud)
+
+	breath_label = Label.new()
+	breath_label.position = Vector2(20, 115)
+	breath_label.text = "BREATH: 100%"
+	hud.add_child(breath_label)
+
+	breath_bar = ProgressBar.new()
+	breath_bar.position = Vector2(20, 140)
+	breath_bar.size = Vector2(200, 20)
+	breath_bar.min_value = 0
+	breath_bar.max_value = 100
+	breath_bar.value = 100
+	breath_bar.show_percentage = false
+	hud.add_child(breath_bar)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
@@ -45,6 +76,14 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if environment_system.has_escaped:
 		return
+			# Hold right-click to hold breath
+	var right_click_pressed = Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
+
+	if not right_click_pressed:
+		breath_locked = false
+		sanity_breath.release_breath()
+	elif not breath_locked:
+		sanity_breath.hold_breath()
 	var direction := Vector3(
 		float(Input.is_physical_key_pressed(KEY_D)) - float(Input.is_physical_key_pressed(KEY_A)),
 		0.0, float(Input.is_physical_key_pressed(KEY_S)) - float(Input.is_physical_key_pressed(KEY_W)))
@@ -83,3 +122,21 @@ func aimed_interaction() -> StringName:
 	if not hit.is_empty() and hit.collider.has_meta("interaction"):
 		return hit.collider.get_meta("interaction")
 	return &""
+	
+func on_player_gasp() -> void:
+	breath_locked = true
+
+	print("PLAYER GASPED!")
+
+	if acoustic != null:
+		acoustic.trigger_involuntary_gasp(global_position)
+		
+func _process(_delta: float) -> void:
+	if sanity_breath == null:
+		return
+
+	breath_label.text = "BREATH: " + str(
+		int(sanity_breath.lung_capacity)
+	) + "%"
+
+	breath_bar.value = sanity_breath.lung_capacity

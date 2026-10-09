@@ -14,6 +14,10 @@ config/name="Echoes of Home - Environment Demo"
 run/main_scene="res://demo/house_demo.tscn"
 config/features=PackedStringArray("4.7")
 
+[autoload]
+
+MusicManager="*uid://dplbjrlffnajw"
+
 [display]
 
 window/size/viewport_width=1280
