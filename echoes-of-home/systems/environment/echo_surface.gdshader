@@ -8,7 +8,7 @@ uniform float fade = 1.0;
 uniform vec4 echo_color : source_color = vec4(0.933, 0.949, 0.969, 1.0);
 
 // Visibility tuning controls
-uniform float ambient_floor : hint_range(0.0, 0.2) = 0.04;      // Faint persistent baseline
+uniform float ambient_floor : hint_range(0.0, 0.3) = 0.04;      // Faint persistent baseline
 uniform float wave_trail_distance : hint_range(4.0, 30.0) = 16.0; // How far back the wave illuminates (was 8.0)
 uniform float surface_fill_boost : hint_range(0.0, 1.0) = 0.22;   // Wall/floor visibility (was 0.045)
 uniform float edge_glow_boost : hint_range(1.0, 3.0) = 1.6;       // Edge pop strength

@@ -45,6 +45,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		rotate_y(-event.relative.x * 0.002)
 		camera.rotation.x = clampf(camera.rotation.x - event.relative.y * 0.002, -1.4, 1.4)
+	if environment_system.has_escaped:
+		if event is InputEventMouseButton and event.pressed:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		match event.physical_keycode:
 			KEY_ESCAPE: Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -55,11 +59,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
-	if not controls_enabled or environment_system.has_escaped:
+	if not controls_enabled:
 		velocity = Vector3.ZERO
 		footsteps.stop()
 		if is_instance_valid(breath_system):
 			breath_system.call("release_breath")
+		return
+	if environment_system.has_escaped:
+		_move_after_escape(delta)
 		return
 	_update_breath_input()
 	var direction := Vector3(
@@ -157,3 +164,14 @@ func on_player_gasp() -> void:
 	breath_locked = true
 
 	print("PLAYER GASPED!")
+
+func _move_after_escape(delta: float) -> void:
+	# Quiet exploration of the bounded porch/garden; gameplay objectives are complete.
+	footsteps.stop()
+	var direction := basis * Vector3(
+		float(Input.is_physical_key_pressed(KEY_D)) - float(Input.is_physical_key_pressed(KEY_A)),
+		0.0, float(Input.is_physical_key_pressed(KEY_S)) - float(Input.is_physical_key_pressed(KEY_W))).normalized()
+	velocity.x = direction.x * 1.8
+	velocity.z = direction.z * 1.8
+	velocity.y -= 18.0 * delta
+	move_and_slide()
