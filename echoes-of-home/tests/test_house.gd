@@ -156,6 +156,40 @@ func run() -> void:
 	await walk(Vector3.BACK, 60)
 	check(demo.environment_system.has_escaped, "Open front door permits crossing exit area")
 	check(not demo.key.visible and demo.key.get_child(0).disabled, "Collected key disappears and stops blocking rays")
+	check(not demo.monster.is_physics_processing() and not demo.breath_system.is_processing(), "Escape safely stops pursuit and breath gameplay")
+	check(not demo.pulse_label.visible and not demo.breath_bar.visible, "Escape removes gameplay meters")
+	check(demo.get_node("Porch").get_child(0).shape.size.x >= 10.0, "Exit has a full-width furnished porch")
+	check(demo.get_node("PorchChair") != null and demo.get_node("PorchPlanter") != null and demo.get_node("NeighborHouse") != null, "Porch chairs, plants and neighborhood exist")
+	await place(Vector3(0, 0.1, 10.5))
+	var explore_start := player.position
+	var noise_before: int = demo.acoustic.active_noise_events.size()
+	var key_event := InputEventKey.new()
+	key_event.physical_keycode = KEY_D
+	key_event.pressed = true
+	Input.parse_input_event(key_event)
+	for frame in 35:
+		await physics_frame
+		player._physics_process(1.0 / 60.0)
+	key_event.pressed = false
+	Input.parse_input_event(key_event)
+	check(player.position.x > explore_start.x + 0.6, "WASD exploration works after escape")
+	check(demo.acoustic.active_noise_events.size() == noise_before, "Safe exploration emits no gameplay noise")
+	var pulse_event := InputEventKey.new()
+	pulse_event.physical_keycode = KEY_SPACE
+	pulse_event.pressed = true
+	player._unhandled_input(pulse_event)
+	check(not player.pulse_requested, "Post-escape controls cannot request a gameplay pulse")
+	await place(Vector3(0, 0.1, 10))
+	await walk(Vector3.FORWARD, 70)
+	check(player.position.z > 8.35, "Terminal escape boundary prevents reentering the house")
+	await place(Vector3(0, 0.1, 13))
+	await walk(Vector3.BACK, 150)
+	check(player.position.z > 18 and player.position.y > -0.1, "Porch connects to a solid garden path without jumping")
+	await walk(Vector3.BACK, 120)
+	check(player.position.z < 21.6 and player.position.y > -0.1, "Garden fence prevents walking into backdrop or falling")
+	await place(Vector3(6.5, 0.1, 17))
+	await walk(Vector3.RIGHT, 50)
+	check(player.position.x < 7.3, "Side garden fence bounds exploration")
 	await place(Vector3(-1, 3.1, -0.5))
 	await walk(Vector3.FORWARD, 60)
 	check(player.position.z > -2, "Bedroom door physically blocks entry")
@@ -174,7 +208,43 @@ func run() -> void:
 		"Game over disables player controls and breath processing")
 	demo._process(0.0)
 	check("Press R to restart" in demo.objective_label.text, "Game-over HUD presents the restart control")
-	print("HOUSE RESULT: ", failures, " failures")
 	demo.queue_free()
 	await process_frame
+	# Exercise the ending controls against real SceneTree scene transitions.
+	change_scene_to_file("res://demo/house_demo.tscn")
+	for frame in 6:
+		await physics_frame
+	demo = current_scene
+	demo.environment_system.interact(&"brass_key")
+	demo.environment_system.interact(&"deadbolt")
+	demo.environment_system.interact(&"exit")
+	demo.environment_system.try_escape()
+	var ending_key := InputEventKey.new()
+	ending_key.pressed = true
+	ending_key.physical_keycode = KEY_R
+	demo._unhandled_input(ending_key)
+	for frame in 6:
+		await physics_frame
+	demo = current_scene
+	check(demo.scene_file_path == "res://demo/house_demo.tscn" and not demo.environment_system.has_escaped,
+		"R after escape restarts a fresh house")
+	check(demo.player.controls_enabled and demo.breath_system.is_processing() and demo.pulse_label.visible,
+		"Restart restores gameplay and HUD")
+	demo.environment_system.interact(&"brass_key")
+	demo.environment_system.interact(&"deadbolt")
+	demo.environment_system.interact(&"exit")
+	demo.environment_system.try_escape()
+	ending_key.physical_keycode = KEY_M
+	demo._unhandled_input(ending_key)
+	for frame in 6:
+		await physics_frame
+	check(current_scene.scene_file_path == "res://demo/main_menu.tscn" and Input.mouse_mode == Input.MOUSE_MODE_VISIBLE,
+		"M after escape returns to the existing main menu")
+	for audio in root.find_children("*", "AudioStreamPlayer", true, false):
+		audio.stop()
+		audio.stream = null
+	await create_timer(0.15).timeout
+	current_scene.queue_free()
+	await process_frame
+	print("HOUSE RESULT: ", failures, " failures")
 	quit(1 if failures else 0)

@@ -36,5 +36,24 @@ func capture() -> void:
 		await process_frame
 		await RenderingServer.frame_post_draw
 		root.get_texture().get_image().save_png("user://environment_" + view[0] + ".png")
+	demo.environment_system.interact(&"brass_key")
+	demo.environment_system.interact(&"deadbolt")
+	demo.environment_system.interact(&"exit")
+	demo.environment_system.try_escape()
+	demo.acoustic.is_pulse_active = false
+	demo.pulse_afterglow = 0.0
+	var exterior_views := [
+		["porch_arrival", Vector3(0, 1.65, 9.8), Vector3(0, 1.8, 40)],
+		["porch_chairs", Vector3(0.7, 1.65, 12), Vector3(-3.8, 1.1, 10)],
+		["garden_neighborhood", Vector3(-1, 1.65, 18), Vector3(1, 2.5, 42)],
+		["porch_from_garden", Vector3(3, 1.65, 19), Vector3(0, 1.4, 10)],
+	]
+	for view in exterior_views:
+		demo.player.position = view[1] - Vector3.UP * 1.55
+		demo.player.camera.look_at(view[2])
+		await process_frame
+		await process_frame
+		await RenderingServer.frame_post_draw
+		root.get_texture().get_image().save_png("user://environment_" + view[0] + ".png")
 	print("Visual captures: ", OS.get_user_data_dir())
 	quit()

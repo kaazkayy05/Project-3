@@ -76,8 +76,11 @@ retain multipliers 0.5, 1.6, 1.8, and 2.0 respectively. Untagged/absent floors f
 back to hardwood. F6 freeze still publishes 1.0 without changing surface identity.
 The demo still calls the original footstep, pulse, and gasp methods. Their signal
 signatures, charge economy, hearing behavior, and resonance scaling are unchanged.
-Current acoustic tuning uses `base_pulse_radius = 36`; tests derive expected radii
-from that exported value (walking radius is base × 0.6 × resonance).
+Current acoustic tuning separates the 36 m visual radius from hearing. Following
+the latest merged hearing balance, walking uses `base_footstep_noise_radius` (5 m),
+pulses use `base_pulse_noise_radius` (12 m) at 0.45 base intensity, and gasps use
+`base_gasp_noise_radius` (14 m). All still scale by the existing surface resonance.
+Tests follow these current exported noise values without changing acoustic code.
 
 Every new visible prop uses the existing environment echo shader and is registered
 in the existing pulse material update list. No new light or shader rewrite is
@@ -148,3 +151,61 @@ and position the camera; they do not alter production lighting or pulse balance.
 
 Automated physics and visual captures complement team playtesting; final pursuit
 difficulty, nostalgic readability, and darkness should still be reviewed in play.
+
+## Developed porch and neighborhood ending
+
+The empty 3 × 3 m exit platform is replaced by an 11 × 5.5 m covered wooden porch.
+It has slatted chairs with faded cushions, a side table and forgotten cup, floor
+planters, hanging baskets, posts, balusters, board seams, a welcome mat and lantern.
+Thin exterior facade skins add siding, window trim/shutters and a pitched roof
+without replacing any interior wall, collision, or pulse material. Original low-poly
+plants and houses are generated from Godot primitives; no external assets are needed.
+
+A level garden path leads from the porch into a fenced front lawn. Beyond the
+non-openable gate are a sidewalk, residential street, trees, and three neighboring
+houses with a few warm windows and a distant moon. The porch/garden are playable;
+the street and neighboring houses are visual scenery, not additional interiors.
+Rail and fence colliders bound exploration, and solid floor/path colliders prevent
+falls. Small decorative parts and neighborhood scenery have collision layer 0,
+keeping them out of the existing monster navigation bake. The porch uses the
+original hardwood surface tag and the original front-door navigation link.
+
+`systems/environment/porch_dusk.gdshader` supplies subdued moon/lantern shading
+only to exterior materials. It shares colors between props and accepts the existing
+pulse origin/radius/fade update, so exterior objects also respond to an echo before
+the escape completes. It creates no world light, changes no indoor shader, and does
+not illuminate the house interior. On escape the background becomes a dark blue
+night sky; no global ambient illumination is introduced.
+
+The existing validated `escaped` signal now enters a safe ending presentation.
+The trigger is a little farther onto the porch, at z=10, so the player is fully
+clear of the doorway before victory. It still requires the key, bolt, optional
+chain, and separate open-door action. Once escaped:
+
+- The existing monster instance stops processing; its AI implementation is unchanged.
+- Breath processing/audio and the chase music stop, and gameplay meters are hidden.
+- Mouse look and slower WASD movement let the player explore the porch and garden.
+- E, echo input, sprinting, and breath input no longer generate gameplay actions/noise.
+- The completed escape is one-way: a terminal doorway collider keeps the player
+  outside. The garden gate/fences keep them inside the authored ending area.
+- R restarts the house and restores normal gameplay; M opens the existing main menu.
+  Escape continues to use the existing pause menu.
+
+House integration tests now drive actual post-escape WASD input, check silence,
+blocked pulse input, porch/path collision, rear/front/side boundaries, and real
+SceneTree restart/menu transitions. They also retain the full interior and escape
+sequence checks. The environment test expectations were aligned with the latest
+merged hearing-balance changes; no teammate production scripts were rewritten.
+
+To inspect the ending, complete the key/bolt/door loop, step onto the porch, then
+look left/right at the furniture and plants. Walk along the central path, look
+across the street at the houses, and turn back toward the porch. Try the garden
+fences, R, M, and Escape. Run the normal test runner for automated validation.
+`tests/capture_house.gd` additionally captures `environment_porch_arrival.png`,
+`environment_porch_chairs.png`, `environment_garden_neighborhood.png`, and
+`environment_porch_from_garden.png`, without needing an active echo outdoors.
+
+Porch update validation on Godot 4.3: full runner passed with 53 environment,
+56 house, and 66 monster checks, plus editor import and the original acoustic
+scene. OpenGL porch/neighborhood captures were inspected. Existing standalone
+ObjectDB shutdown warnings remain; no script errors or failed checks occurred.
