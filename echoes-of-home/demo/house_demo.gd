@@ -13,6 +13,9 @@ var navigation_region: NavigationRegion3D
 var front_navigation_link: NavigationLink3D
 var bedroom_navigation_link: NavigationLink3D
 var materials: Array[ShaderMaterial] = []
+var exterior_materials: Dictionary = {}
+var world_environment: WorldEnvironment
+var porch_return_barrier: StaticBody3D
 var key: StaticBody3D
 var deadbolt: StaticBody3D
 var bolt_thumb: StaticBody3D
@@ -32,6 +35,9 @@ var feedback_sound: AudioStreamPlayer
 var previous_key_found := false
 var previous_bolt_unlocked := false
 var death_sound: AudioStreamPlayer
+var breath_vignette: ColorRect
+var breath_vignette_material: ShaderMaterial
+var breath_vignette_latched: bool = false
 
 func _ready() -> void:
 	acoustic = AcousticPulseSystem.new()
@@ -63,7 +69,7 @@ func _ready() -> void:
 	breath_system.connect(&"gasp_triggered", Callable(self, "_on_gasp_triggered"))
 	monster = MONSTER_SCENE.instantiate() as MonsterAI
 	monster.name = "Monster"
-	monster.position = Vector3(4, 3.1, 0)
+	monster.position = Vector3(10, 3.1, -8)
 	add_child(monster)
 	monster.bind_acoustic_system(acoustic)
 	breath_system.bind_seam4_player(player)
@@ -73,18 +79,47 @@ func _ready() -> void:
 	monster.bind_breath_system(breath_system, player)
 	monster.player_killed.connect(_on_player_killed)
 	environment_system.objectives_changed.connect(_sync_objectives)
+	_build_breath_vignette()
 	_build_hud()
 	_build_death_notification()
+	environment_system.escaped.connect(_on_escaped)
 	var world := WorldEnvironment.new()
+	world_environment = world
 	world.environment = Environment.new()
 	world.environment.background_mode = Environment.BG_COLOR
 	world.environment.background_color = Color("0a0a0c")
-	world.environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
-	world.environment.ambient_light_energy = 0.0
+	world.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	world.environment.ambient_light_energy = 0.25; world.environment.ambient_light_color = Color("1a1e24")
 	world.environment.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	add_child(world)
 	if not MusicManager.music.playing:
 		MusicManager.music.play(0.0)
+
+
+func _build_breath_vignette() -> void:
+	var canvas := CanvasLayer.new()
+	canvas.name = "BreathVignette"
+	canvas.layer = 0 # Above the world, below the HUD (1), death (10), and pause (100).
+	add_child(canvas)
+	breath_vignette_material = ShaderMaterial.new()
+	breath_vignette_material.shader = preload("res://demo/shaders/breath_vignette.gdshader")
+	breath_vignette = ColorRect.new()
+	breath_vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	breath_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	breath_vignette.material = breath_vignette_material
+	canvas.add_child(breath_vignette)
+
+
+func _update_breath_vignette() -> void:
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		breath_vignette_latched = false
+	elif is_instance_valid(breath_system):
+		if float(breath_system.get("lung_capacity")) == 0.0:
+			breath_vignette_latched = true
+	breath_vignette.visible = (
+		breath_vignette_latched and not game_over and not environment_system.has_escaped
+	)
+	breath_vignette_material.set_shader_parameter("lungs_empty", breath_vignette_latched)
 
 
 func _build_death_notification() -> void:
@@ -357,7 +392,7 @@ func _build_house() -> void:
 	bolt_thumb = box("DeadboltThumbTurn", Vector3(-0.66, 1.35, 7.65), Vector3(0.10, 0.28, 0.12), -1, &"deadbolt")
 	if require_chain:
 		box("Chain", Vector3(1.2, 1.5, 7.8), Vector3(0.2, 0.3, 0.18), -1, &"chain")
-	box("Porch", Vector3(0, -0.15, 9.5), Vector3(3, 0.3, 3), S.HARDWOOD)
+	_build_exterior()
 	box("KitchenDividerLeft", Vector3(-5, 1.5, -0.5), Vector3(6, 3, 0.2))
 	box("KitchenDividerRight", Vector3(5, 1.5, -0.5), Vector3(6, 3, 0.2))
 	box("Sofa", Vector3(-6, 0.5, 3), Vector3(1.3, 1, 3))
@@ -382,7 +417,8 @@ func _build_house() -> void:
 	box("UpperFrontWall", Vector3(0, 4.5, 8), Vector3(16, 3, 0.2))
 	box("LandingRail", Vector3(-2, 3.5, 2), Vector3(12, 1, 0.1))
 	var exit_zone := Area3D.new()
-	exit_zone.position = Vector3(0, 1, 9)
+	exit_zone.name = "PorchEscapeZone"
+	exit_zone.position = Vector3(0, 1, 10)
 	var exit_shape := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
 	shape.size = Vector3(2, 2, 1)
@@ -415,7 +451,10 @@ func _sync_objectives(_progress: Dictionary) -> void:
 
 
 func _on_gasp_triggered() -> void:
-	if not game_over:
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
+			and float(breath_system.get("lung_capacity")) == 0.0:
+		breath_vignette_latched = true
+	if not game_over and not environment_system.has_escaped:
 		acoustic.trigger_involuntary_gasp(player.global_position)
 
 
@@ -437,12 +476,29 @@ func _on_player_killed(_noise_origin: Vector3, _intensity: float) -> void:
 	death_sound.play()
 
 
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton \
+			and event.button_index == MOUSE_BUTTON_RIGHT \
+			and not event.pressed:
+		breath_vignette_latched = false
+		breath_vignette.hide()
+		breath_vignette_material.set_shader_parameter("lungs_empty", false)
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if environment_system.has_escaped and event is InputEventKey and event.pressed and not event.echo:
+		if event.physical_keycode == KEY_R:
+			get_tree().reload_current_scene()
+		elif event.physical_keycode == KEY_M:
+			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+			get_tree().change_scene_to_file("res://demo/main_menu.tscn")
+		return
 	if game_over and event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode == KEY_R:
 			get_tree().reload_current_scene()
 
 func _process(delta: float) -> void:
+	_update_breath_vignette()
 	pulse_afterglow = 0.6 if acoustic.is_pulse_active else maxf(0.0, pulse_afterglow - delta)
 	for material in materials:
 		material.set_shader_parameter("pulse_origin", acoustic.pulse_origin)
@@ -470,7 +526,7 @@ func _process(delta: float) -> void:
 	if game_over:
 		objective_label.text = "THE LISTENER HEARD YOU\nPress R to restart."
 	elif environment_system.has_escaped:
-		objective_label.text = "You escaped the house."
+		objective_label.text = "You escaped the house.\nThe street is quiet. Too quiet.\n\nExplore the porch and garden."
 
 # Details share the pulse shader without creating snagging collision geometry.
 func detail(label: String, pos: Vector3, size: Vector3, color: Color) -> StaticBody3D:
@@ -585,3 +641,243 @@ func _table(label: String, pos: Vector3, size: Vector3) -> void:
 	for x in [-1, 1]:
 		for z in [-1, 1]:
 			detail(label + "Leg", pos + Vector3(x * (size.x / 2.0 - 0.12), -0.06, z * (size.z / 2.0 - 0.12)), Vector3(0.12, size.y - 0.12, 0.12), Color("927452"))
+
+func _on_escaped() -> void:
+	# A terminal, safe ending state; the original objective/porch validation owns victory.
+	monster.velocity = Vector3.ZERO
+	monster.set_physics_process(false)
+	monster.set_process(false)
+	breath_system.call("release_breath")
+	breath_system.set_process(false)
+	for audio in breath_system.find_children("*", "AudioStreamPlayer", true, false):
+		audio.stop()
+	MusicManager.music.stop()
+	player.velocity = Vector3.ZERO
+	player.pulse_requested = false
+	player.interaction_requested = false
+	player.interaction_hint = ""
+	porch_return_barrier.set_deferred("collision_layer", 1)
+	world_environment.environment.background_color = Color("101a2a")
+	pulse_label.hide()
+	breath_label.hide()
+	breath_bar.hide()
+	status_label.hide()
+	controls_label.text = "WASD — Explore porch & garden | Mouse — Look\nR — Restart | M — Main Menu | Esc — Pause"
+
+# Exterior shading is local to these meshes: no light spills into the dark house.
+# Background scenery has no collision/nav contribution. Porch, furniture, and fences do.
+func outdoor_box(label: String, pos: Vector3, size: Vector3, color: Color,
+		solid: bool = true, glow: float = 0.0) -> StaticBody3D:
+	var body := box(label, pos, size)
+	body.collision_layer = 1 if solid else 0
+	if DisplayServer.get_name() != "headless":
+		# Replace the just-created indoor material with a shared exterior material.
+		materials.pop_back()
+		var material_key := color.to_html() + ":" + str(glow)
+		if not exterior_materials.has(material_key):
+			var material := ShaderMaterial.new()
+			material.shader = preload("res://systems/environment/porch_dusk.gdshader")
+			material.set_shader_parameter("base_color", color)
+			material.set_shader_parameter("warm_glow", glow)
+			exterior_materials[material_key] = material
+			materials.append(material)
+		(body.get_child(1) as MeshInstance3D).material_override = exterior_materials[material_key]
+	return body
+
+func _porch_chair(pos: Vector3) -> void:
+	var wood := Color("a99b7e")
+	# One smooth collider keeps arms/legs from snagging the player.
+	var blocker := outdoor_box("PorchChair", pos + Vector3(0, 0.65, 0), Vector3(1.1, 1.3, 1.05), wood)
+	if DisplayServer.get_name() != "headless":
+		(blocker.get_child(1) as MeshInstance3D).hide()
+	outdoor_box("ChairSeat", pos + Vector3(0, 0.52, 0), Vector3(1, 0.12, 0.9), wood, false)
+	for x in [-0.4, 0.4]:
+		for z in [-0.35, 0.35]:
+			outdoor_box("ChairLeg", pos + Vector3(x, 0.25, z), Vector3(0.1, 0.5, 0.1), wood, false)
+		outdoor_box("ChairArm", pos + Vector3(x, 0.8, 0), Vector3(0.13, 0.1, 1), wood, false)
+	for x in [-0.4, -0.2, 0, 0.2, 0.4]:
+		outdoor_box("ChairBackSlat", pos + Vector3(x, 0.95, -0.4), Vector3(0.12, 0.7, 0.08), wood, false)
+	outdoor_box("ChairBackTop", pos + Vector3(0, 1.32, -0.4), Vector3(1.05, 0.12, 0.12), wood, false)
+	outdoor_box("FadedChairCushion", pos + Vector3(0, 0.61, 0.03), Vector3(0.8, 0.08, 0.68), Color("6c7e77"), false)
+
+func _porch_plant(pos: Vector3, hanging: bool = false) -> void:
+	var pot := outdoor_box("HangingBasket" if hanging else "PorchPlanter", pos + Vector3(0, 0.26, 0), Vector3(0.7, 0.52, 0.7), Color("a87655"), not hanging)
+	if DisplayServer.get_name() != "headless":
+		var cylinder := CylinderMesh.new()
+		cylinder.top_radius = 0.35
+		cylinder.bottom_radius = 0.23
+		cylinder.height = 0.52
+		cylinder.radial_segments = 12
+		(pot.get_child(1) as MeshInstance3D).mesh = cylinder
+	for i in 7:
+		var angle := i * TAU / 7.0
+		var leaf := outdoor_box("PlanterLeaf", pos + Vector3(cos(angle) * 0.2, 0.65, sin(angle) * 0.2), Vector3(0.22, 0.65, 0.15), Color("58794c"), false)
+		leaf.rotation = Vector3(sin(angle) * 0.65, angle, cos(angle) * 0.65)
+		if DisplayServer.get_name() != "headless":
+			var geometry := SphereMesh.new()
+			geometry.radius = 0.5
+			geometry.height = 2.0
+			geometry.radial_segments = 8
+			geometry.rings = 4
+			var mesh := leaf.get_child(1) as MeshInstance3D
+			mesh.mesh = geometry
+			mesh.scale = Vector3(0.22, 0.35, 0.15)
+	if hanging:
+		outdoor_box("BasketChain", pos + Vector3(0, 0.85, 0), Vector3(0.025, 0.7, 0.025), Color("7b807a"), false)
+
+func _neighbor_house(pos: Vector3, color: Color) -> void:
+	outdoor_box("NeighborHouse", pos + Vector3(0, 2.5, 0), Vector3(10, 5, 8), color, false)
+	var roof := outdoor_box("NeighborPitchedRoof", pos + Vector3(0, 6.4, 0), Vector3(11, 2.8, 9), Color("343d4b"), false)
+	if DisplayServer.get_name() != "headless":
+		var geometry := PrismMesh.new()
+		geometry.size = Vector3(11, 2.8, 9)
+		(roof.get_child(1) as MeshInstance3D).mesh = geometry
+	outdoor_box("NeighborChimney", pos + Vector3(2.5, 6.8, 1), Vector3(0.8, 2, 0.8), Color("6d5955"), false)
+	outdoor_box("NeighborDoor", pos + Vector3(0, 1.1, -4.07), Vector3(1.1, 2.2, 0.1), Color("574a43"), false)
+	outdoor_box("NeighborStoop", pos + Vector3(0, 0.1, -4.6), Vector3(2, 0.2, 1.2), Color("778080"), false)
+	for x in [-2.8, 2.8]:
+		for y in [1.65, 3.8]:
+			outdoor_box("NeighborWindowFrame", pos + Vector3(x, y, -4.08), Vector3(1.65, 1.35, 0.12), Color("b4b7aa"), false)
+			var lit: bool = x < 0 and y < 2
+			outdoor_box("NeighborWindow", pos + Vector3(x, y, -4.16), Vector3(1.4, 1.1, 0.04), Color("d9b67b") if lit else Color("203142"), false, 0.55 if lit else 0.0)
+			outdoor_box("WindowMullion", pos + Vector3(x, y, -4.2), Vector3(0.06, 1.1, 0.04), Color("b4b7aa"), false)
+			outdoor_box("WindowCrossbar", pos + Vector3(x, y, -4.2), Vector3(1.4, 0.06, 0.04), Color("b4b7aa"), false)
+	for y in [0.6, 1.2, 2.6, 3.0, 4.6]:
+		outdoor_box("NeighborSiding", pos + Vector3(0, y, -4.04), Vector3(10, 0.035, 0.02), color.lightened(0.1), false)
+
+func _build_exterior() -> void:
+	_build_house_facade()
+	var timber := Color("8f8069")
+	var trim := Color("b4b8ac")
+	outdoor_box("Porch", Vector3(0, -0.15, 10.75), Vector3(11, 0.3, 5.5), timber).set_meta("surface_type", S.HARDWOOD)
+	for i in 22:
+		outdoor_box("PorchBoardSeam", Vector3(-5.25 + i * 0.5, 0.006, 10.75), Vector3(0.022, 0.01, 5.45), Color("4e4a40"), false)
+	outdoor_box("PorchCanopy", Vector3(0, 3, 10.75), Vector3(11.6, 0.22, 5.7), Color("5e6966"))
+	outdoor_box("PorchFascia", Vector3(0, 2.88, 13.5), Vector3(11.6, 0.32, 0.16), trim, false)
+	for x in [-5.25, 5.25]:
+		outdoor_box("PorchPost", Vector3(x, 1.45, 13.2), Vector3(0.22, 2.9, 0.22), trim)
+		outdoor_box("PorchSideRail", Vector3(x, 0.95, 10.8), Vector3(0.14, 0.14, 4.8), trim)
+		for z in [8.6, 9.2, 9.8, 10.4, 11, 11.6, 12.2, 12.8]:
+			outdoor_box("PorchBaluster", Vector3(x, 0.5, z), Vector3(0.07, 0.85, 0.07), trim, false)
+	for x in [-3.5, 3.5]:
+		outdoor_box("PorchFrontRail", Vector3(x, 0.95, 13.3), Vector3(3.5, 0.14, 0.14), trim)
+		for i in 6:
+			outdoor_box("FrontBaluster", Vector3(x - 1.5 + i * 0.6, 0.5, 13.3), Vector3(0.07, 0.85, 0.07), trim, false)
+	_porch_chair(Vector3(-3.6, 0, 10.1))
+	_porch_chair(Vector3(3.6, 0, 10.1))
+	var table := outdoor_box("PorchSideTable", Vector3(-2.1, 0.3, 10.5), Vector3(0.75, 0.6, 0.75), timber)
+	if DisplayServer.get_name() != "headless":
+		var mesh := table.get_child(1) as MeshInstance3D
+		(mesh.mesh as BoxMesh).size.y = 0.1
+		mesh.position.y = 0.25
+	for x in [-2.38, -1.82]:
+		for z in [10.22, 10.78]:
+			outdoor_box("PorchTableLeg", Vector3(x, 0.25, z), Vector3(0.09, 0.5, 0.09), timber, false)
+	var cup := outdoor_box("ForgottenTeaCup", Vector3(-2.1, 0.7, 10.5), Vector3(0.16, 0.2, 0.16), Color("b9ac8e"), false)
+	if DisplayServer.get_name() != "headless":
+		var geometry := CylinderMesh.new()
+		geometry.top_radius = 0.09
+		geometry.bottom_radius = 0.07
+		geometry.height = 0.2
+		geometry.radial_segments = 12
+		(cup.get_child(1) as MeshInstance3D).mesh = geometry
+	_porch_plant(Vector3(-4.6, 0, 12.3))
+	_porch_plant(Vector3(4.6, 0, 12.3))
+	_porch_plant(Vector3(-4.5, 1.5, 9), true)
+	_porch_plant(Vector3(4.5, 1.5, 9), true)
+	outdoor_box("PorchLanternMount", Vector3(-2.4, 2.3, 8.18), Vector3(0.25, 0.5, 0.15), Color("343a3a"), false)
+	outdoor_box("PorchLanternGlass", Vector3(-2.4, 2.3, 8.3), Vector3(0.18, 0.3, 0.15), Color("e5bd7a"), false, 0.8)
+	outdoor_box("WelcomeMat", Vector3(0, 0.015, 8.9), Vector3(1.5, 0.03, 0.7), Color("82775b"), false)
+	# A level path avoids a new step-up requirement in the existing controller.
+	outdoor_box("FrontGardenGround", Vector3(0, -0.2, 15), Vector3(16, 0.3, 14), Color("3c5144"))
+	outdoor_box("GardenPath", Vector3(0, -0.04, 17.5), Vector3(2.8, 0.08, 8), Color("8b8c80"))
+	for z in [14.5, 16.5, 18.5, 20.5]:
+		outdoor_box("PathJoint", Vector3(0, 0.006, z), Vector3(2.8, 0.01, 0.025), Color("4b5350"), false)
+	for x in [-7.5, 7.5]:
+		var side := outdoor_box("GardenSideBoundary", Vector3(x, 0.6, 15), Vector3(0.14, 1.2, 14), trim)
+		if DisplayServer.get_name() != "headless":
+			(side.get_child(1) as MeshInstance3D).hide()
+		for height in [0.35, 0.95]:
+			outdoor_box("SideFenceRail", Vector3(x, height, 15), Vector3(0.14, 0.12, 14), trim, false)
+		for i in 23:
+			outdoor_box("SideFencePicket", Vector3(x, 0.8, 8.3 + i * 0.6), Vector3(0.14, 0.8, 0.18), trim, false)
+	var fence := outdoor_box("GardenFrontFence", Vector3(0, 0.55, 21.8), Vector3(15, 1.1, 0.12), Color("707e73"))
+	if DisplayServer.get_name() != "headless":
+		(fence.get_child(1) as MeshInstance3D).hide()
+	for height in [0.35, 0.95]:
+		outdoor_box("FrontFenceRail", Vector3(0, height, 21.8), Vector3(15, 0.12, 0.12), trim, false)
+	for i in 26:
+		outdoor_box("FrontFencePicket", Vector3(-7.5 + i * 0.6, 0.8, 21.8), Vector3(0.14, 0.8, 0.18), trim, false)
+	for height in [0.25, 0.95]:
+		outdoor_box("GardenGate", Vector3(0, height, 21.65), Vector3(2.5, 0.14, 0.16), timber, false)
+	for i in 9:
+		outdoor_box("GatePicket", Vector3(-1.15 + i * 0.2875, 0.65, 21.6), Vector3(0.15, 1.2, 0.1), timber, false)
+	var brace := outdoor_box("GateBrace", Vector3(0, 0.6, 21.5), Vector3(2.45, 0.12, 0.1), timber, false)
+	brace.rotation.z = atan(0.7 / 2.3)
+	outdoor_box("GateLatch", Vector3(0.95, 0.9, 21.48), Vector3(0.24, 0.07, 0.08), Color("9a997d"), false)
+	# These invisible collision planes close the slivers beside the house facade.
+	for x in [-6.5, 6.5]:
+		var boundary := outdoor_box("GardenRearBoundary", Vector3(x, 1, 8), Vector3(2, 2, 0.12), trim)
+		if DisplayServer.get_name() != "headless":
+			(boundary.get_child(1) as MeshInstance3D).hide()
+	porch_return_barrier = outdoor_box("PorchReturnBarrier", Vector3(0, 1.2, 8.15), Vector3(2, 2.4, 0.12), timber, false)
+	if DisplayServer.get_name() != "headless":
+		(porch_return_barrier.get_child(1) as MeshInstance3D).hide()
+	# The neighborhood is a backdrop beyond the safe garden fence, not a new level.
+	outdoor_box("NeighborhoodLawns", Vector3(0, -0.3, 36), Vector3(100, 0.2, 60), Color("34463e"), false)
+	outdoor_box("Sidewalk", Vector3(0, -0.12, 24), Vector3(90, 0.1, 2.5), Color("7d8582"), false)
+	outdoor_box("ResidentialStreet", Vector3(0, -0.13, 29), Vector3(100, 0.1, 7), Color("303d47"), false)
+	outdoor_box("OppositeSidewalk", Vector3(0, -0.12, 34), Vector3(90, 0.1, 2), Color("7d8582"), false)
+	for x in [-30, -20, -10, 0, 10, 20, 30]:
+		outdoor_box("StreetMarking", Vector3(x, -0.07, 29), Vector3(3, 0.02, 0.08), Color("b2ad8d"), false)
+	_neighbor_house(Vector3(-15, 0, 43), Color("81908c"))
+	_neighbor_house(Vector3(1, 0, 44), Color("988b79"))
+	_neighbor_house(Vector3(18, 0, 42), Color("7e8999"))
+	for x in [-10, 10]:
+		outdoor_box("GardenShrub", Vector3(x, 0.55, 18), Vector3(2.5, 1.1, 3), Color("364f3c"), false)
+	for pos in [Vector3(-11, 0, 23), Vector3(12, 0, 22), Vector3(-25, 0, 37), Vector3(27, 0, 36)]:
+		outdoor_box("StreetTreeTrunk", pos + Vector3(0, 2.2, 0), Vector3(0.45, 4.4, 0.45), Color("5b5448"), false)
+		var crown := outdoor_box("StreetTreeCrown", pos + Vector3(0, 4.8, 0), Vector3(4, 4, 4), Color("344e42"), false)
+		if DisplayServer.get_name() != "headless":
+			var geometry := SphereMesh.new()
+			geometry.radius = 2.3
+			geometry.height = 4.5
+			geometry.radial_segments = 10
+			geometry.rings = 5
+			(crown.get_child(1) as MeshInstance3D).mesh = geometry
+
+	var moon := outdoor_box("DistantMoon", Vector3(-22, 22, 60), Vector3(2.8, 2.8, 2.8), Color("a8b6c8"), false, 0.8)
+	if DisplayServer.get_name() != "headless":
+		var geometry := SphereMesh.new()
+		geometry.radius = 1.4
+		geometry.height = 2.8
+		(moon.get_child(1) as MeshInstance3D).mesh = geometry
+
+func _build_house_facade() -> void:
+	# Thin outside-only skins retain all indoor walls, openings, and their pulse materials.
+	var siding := Color("7b8c8d")
+	var trim := Color("c2bda9")
+	for x in [-4.5, 4.5]:
+		outdoor_box("HouseExteriorSiding", Vector3(x, 1.5, 8.13), Vector3(7, 3, 0.04), siding, false)
+		for i in 9:
+			outdoor_box("LowerSidingSeam", Vector3(x, 0.2 + i * 0.3, 8.16), Vector3(7, 0.02, 0.02), siding.darkened(0.2), false)
+	outdoor_box("HouseUpperFacade", Vector3(0, 4.5, 8.13), Vector3(16, 3, 0.04), siding, false)
+	for i in 10:
+		outdoor_box("UpperSidingSeam", Vector3(0, 3.1 + i * 0.3, 8.16), Vector3(16, 0.02, 0.02), siding.darkened(0.2), false)
+	for pos in [Vector3(-4.3, 4.5, 8.2), Vector3(4.3, 4.5, 8.2), Vector3(-6.7, 1.7, 8.2), Vector3(6.7, 1.7, 8.2)]:
+		outdoor_box("HomeWindowTrim", pos, Vector3(1.7, 1.7, 0.12), trim, false)
+		outdoor_box("HomeWindowGlass", pos + Vector3(0, 0, 0.08), Vector3(1.45, 1.45, 0.06), Color("26383f"), false)
+		outdoor_box("HomeWindowMullion", pos + Vector3(0, 0, 0.13), Vector3(0.07, 1.45, 0.04), trim, false)
+		outdoor_box("HomeWindowCrossbar", pos + Vector3(0, 0, 0.13), Vector3(1.45, 0.07, 0.04), trim, false)
+		for side in [-1, 1]:
+			outdoor_box("HomeWindowShutter", pos + Vector3(side * 1.0, 0, 0), Vector3(0.25, 1.7, 0.1), Color("445955"), false)
+	for x in [-1.07, 1.07]:
+		outdoor_box("FrontDoorCasing", Vector3(x, 1.2, 8.23), Vector3(0.14, 2.4, 0.12), trim, false)
+	outdoor_box("DoorCasingLintel", Vector3(0, 2.48, 8.23), Vector3(2.3, 0.16, 0.12), trim, false)
+	outdoor_box("HouseNumberPlaque", Vector3(1.5, 2, 8.25), Vector3(0.5, 0.25, 0.08), Color("4a5048"), false)
+	var roof := outdoor_box("HomePitchedRoof", Vector3(0, 7.15, 0), Vector3(16.6, 2.1, 16.6), Color("3e4a51"), false)
+	if DisplayServer.get_name() != "headless":
+		var geometry := PrismMesh.new()
+		geometry.size = Vector3(16.6, 2.1, 16.6)
+		(roof.get_child(1) as MeshInstance3D).mesh = geometry
+	outdoor_box("HouseRoofTrim", Vector3(0, 6.12, 8.35), Vector3(16.6, 0.16, 0.16), trim, false)

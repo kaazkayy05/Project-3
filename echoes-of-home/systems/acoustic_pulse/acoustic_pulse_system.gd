@@ -22,7 +22,7 @@ signal pulse_ended()
 @export var base_pulse_speed: float = 8.0
 
 @export_group("Noise Emission Tuning")
-@export var base_pulse_noise_radius: float = 12.0
+@export var base_pulse_noise_radius: float = 7.5
 @export var base_footstep_noise_radius: float = 5.0
 @export var base_gasp_noise_radius: float = 14.0
 
