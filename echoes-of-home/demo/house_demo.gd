@@ -14,9 +14,12 @@ var front_navigation_link: NavigationLink3D
 var bedroom_navigation_link: NavigationLink3D
 var materials: Array[ShaderMaterial] = []
 var key: StaticBody3D
+var deadbolt: StaticBody3D
+var bolt_thumb: StaticBody3D
 var front_door: StaticBody3D
 var bedroom_door: StaticBody3D
 var pulse_afterglow: float = 0.0
+var interaction_label: Label
 var objective_label: Label
 var pulse_label: Label
 var controls_label: Label
@@ -25,6 +28,9 @@ var breath_bar: ProgressBar
 var status_label: Label
 var game_over: bool = false
 var death_overlay: CanvasLayer
+var feedback_sound: AudioStreamPlayer
+var previous_key_found := false
+var previous_bolt_unlocked := false
 var death_sound: AudioStreamPlayer
 
 func _ready() -> void:
@@ -36,6 +42,7 @@ func _ready() -> void:
 	environment_system.require_chain = require_chain
 	environment_system.name = "EnvironmentSystem"
 	add_child(environment_system)
+	_build_feedback_sound()
 	_build_house()
 	_build_navigation()
 	player = CharacterBody3D.new()
@@ -136,7 +143,11 @@ func _build_hud() -> void:
 	canvas.add_child(root)
 
 	objective_label = _make_hud_label(
-		root, Vector2(0, 0), Rect2(20, 20, 280, 110)
+		root, Vector2(0, 0), Rect2(20, 20, 280, 180)
+	)
+	interaction_label = _make_hud_label(
+		root, Vector2(0.5, 1), Rect2(-350, -140, 700, 60),
+		HORIZONTAL_ALIGNMENT_CENTER
 	)
 	pulse_label = _make_hud_label(
 		root, Vector2(1, 0), Rect2(-200, 20, 180, 50),
@@ -282,6 +293,7 @@ func box(label: String, pos: Vector3, size: Vector3, surface: int = -1, action: 
 		body.set_meta("surface_type", surface)
 	if action != &"":
 		body.set_meta("interaction", action)
+		body.add_to_group("house_interactables")
 	var collision := CollisionShape3D.new()
 	var shape := BoxShape3D.new()
 	shape.size = size
@@ -297,7 +309,11 @@ func box(label: String, pos: Vector3, size: Vector3, surface: int = -1, action: 
 	mesh.mesh = geometry
 	var material := ShaderMaterial.new()
 	material.shader = preload("res://systems/environment/echo_surface.gdshader")
-	if surface == S.CARPET:
+	if action == &"deadbolt" or action == &"brass_key":
+		material.set_shader_parameter("echo_color", Color("e9ba63"))
+		material.set_shader_parameter("ambient_floor", 0.012)
+		material.set_shader_parameter("surface_fill_boost", 0.65)
+	elif surface == S.CARPET:
 		material.set_shader_parameter("echo_color", Color("3d4852"))
 	elif surface >= S.HARDWOOD or action == &"brass_key":
 		material.set_shader_parameter("echo_color", Color("c98a2c"))
@@ -313,14 +329,32 @@ func _build_house() -> void:
 	box("LivingRoomRug", Vector3(-4, 0.025, 2), Vector3(5, 0.05, 5), S.CARPET)
 	box("FoyerRunner", Vector3(0, 0.025, 4), Vector3(1.6, 0.05, 6), S.CARPET)
 	box("KitchenClutter", Vector3(3, 0.04, -2), Vector3(2, 0.08, 1.2), S.CLUTTER)
-	box("WestWall", Vector3(-8, 3, 0), Vector3(0.2, 6, 16))
+	box("FamilyRoomFloor", Vector3(-10, -0.15, 2), Vector3(4, 0.3, 12), S.HARDWOOD)
+	box("FamilyRoomWest", Vector3(-12, 1.5, 2), Vector3(0.2, 3, 12))
+	box("FamilyRoomNorth", Vector3(-10, 1.5, -4), Vector3(4, 3, 0.2))
+	box("FamilyRoomSouth", Vector3(-10, 1.5, 8), Vector3(4, 3, 0.2))
+	box("FamilyRoomCeiling", Vector3(-10, 3.1, 2), Vector3(4, 0.2, 12))
+	box("WestUpperWall", Vector3(-8, 4.5, 0), Vector3(0.2, 3, 16))
+	box("WestBackWall", Vector3(-8, 1.5, -6), Vector3(0.2, 3, 4))
+	box("WestPierNorth", Vector3(-8, 1.5, -0.5), Vector3(0.2, 3, 3))
+	box("WestPierSouth", Vector3(-8, 1.5, 7), Vector3(0.2, 3, 2))
 	box("EastWall", Vector3(8, 3, 0), Vector3(0.2, 6, 16))
 	box("NorthWall", Vector3(0, 3, -8), Vector3(16, 6, 0.2))
 	box("FrontLeft", Vector3(-4.5, 1.5, 8), Vector3(7, 3, 0.2))
 	box("FrontRight", Vector3(4.5, 1.5, 8), Vector3(7, 3, 0.2))
 	box("FrontLintel", Vector3(0, 2.7, 8), Vector3(2, 0.6, 0.2))
 	front_door = box("FrontDoor", Vector3(0, 1.2, 8), Vector3(2, 2.4, 0.16), -1, &"exit")
-	box("Deadbolt", Vector3(-1.2, 1.2, 7.8), Vector3(0.2, 0.3, 0.18), -1, &"deadbolt")
+	deadbolt = box("Deadbolt", Vector3(-0.66, 1.35, 7.78), Vector3(0.32, 0.44, 0.16), -1, &"deadbolt")
+	if DisplayServer.get_name() != "headless":
+		var plate := CylinderMesh.new()
+		plate.top_radius = 0.2
+		plate.bottom_radius = 0.2
+		plate.height = 0.14
+		plate.radial_segments = 16
+		var plate_mesh := deadbolt.get_child(1) as MeshInstance3D
+		plate_mesh.mesh = plate
+		plate_mesh.rotation.x = PI / 2.0
+	bolt_thumb = box("DeadboltThumbTurn", Vector3(-0.66, 1.35, 7.65), Vector3(0.10, 0.28, 0.12), -1, &"deadbolt")
 	if require_chain:
 		box("Chain", Vector3(1.2, 1.5, 7.8), Vector3(0.2, 0.3, 0.18), -1, &"chain")
 	box("Porch", Vector3(0, -0.15, 9.5), Vector3(3, 0.3, 3), S.HARDWOOD)
@@ -343,6 +377,7 @@ func _build_house() -> void:
 	box("BedroomDoorHandle", Vector3(0.2, 4.2, -1.8), Vector3(0.2, 0.3, 0.2), -1, &"bedroom_door")
 	box("BedroomRug", Vector3(-4, 3.025, -5), Vector3(5, 0.05, 4), S.CARPET)
 	box("Bed", Vector3(-5, 3.4, -6), Vector3(2, 0.8, 3))
+	_furnish_home()
 	box("Roof", Vector3(0, 6.1, 0), Vector3(16, 0.2, 16))
 	box("UpperFrontWall", Vector3(0, 4.5, 8), Vector3(16, 3, 0.2))
 	box("LandingRail", Vector3(-2, 3.5, 2), Vector3(12, 1, 0.1))
@@ -359,6 +394,16 @@ func _build_house() -> void:
 			environment_system.try_escape())
 
 func _sync_objectives(_progress: Dictionary) -> void:
+	if (environment_system.objective_progress.key_found and not previous_key_found
+			or environment_system.objective_progress.bolt_unlocked and not previous_bolt_unlocked):
+		feedback_sound.play()
+	previous_key_found = environment_system.objective_progress.key_found
+	previous_bolt_unlocked = environment_system.objective_progress.bolt_unlocked
+	deadbolt.visible = not environment_system.room_layout_state.front_door.open
+	bolt_thumb.visible = deadbolt.visible
+	deadbolt.get_child(0).set_deferred("disabled", not deadbolt.visible)
+	bolt_thumb.get_child(0).set_deferred("disabled", not bolt_thumb.visible)
+	bolt_thumb.rotation.z = PI / 2.0 if environment_system.objective_progress.bolt_unlocked else 0.0
 	key.visible = not environment_system.objective_progress.key_found
 	key.get_child(0).set_deferred("disabled", environment_system.objective_progress.key_found)
 	front_door.visible = not environment_system.room_layout_state.front_door.open
@@ -400,8 +445,7 @@ func _process(delta: float) -> void:
 		material.set_shader_parameter("pulse_active", pulse_afterglow > 0.0)
 		material.set_shader_parameter("fade", pulse_afterglow / 0.6)
 	objective_label.text = "OBJECTIVE\n" + player.message
-	if not player.interaction_hint.is_empty():
-		objective_label.text += "\n" + player.interaction_hint
+	interaction_label.text = player.interaction_hint if not game_over and not environment_system.has_escaped else ""
 
 	pulse_label.text = "ECHO PULSES\n%d / %d" % [
 		acoustic.pulse_charges, acoustic.max_pulse_charges
@@ -422,3 +466,117 @@ func _process(delta: float) -> void:
 		objective_label.text = "THE LISTENER HEARD YOU\nPress R to restart."
 	elif environment_system.has_escaped:
 		objective_label.text = "You escaped the house."
+
+# Details share the pulse shader without creating snagging collision geometry.
+func detail(label: String, pos: Vector3, size: Vector3, color: Color) -> StaticBody3D:
+	var prop := box(label, pos, size)
+	prop.collision_layer = 0
+	if DisplayServer.get_name() != "headless":
+		var material := (prop.get_child(1) as MeshInstance3D).material_override as ShaderMaterial
+		material.set_shader_parameter("echo_color", color)
+		material.set_shader_parameter("ambient_floor", 0.012)
+	return prop
+
+func _picture(label: String, pos: Vector3, crooked: bool = false) -> void:
+	var frame := detail(label, pos, Vector3(0.7, 0.55, 0.06), Color("9d7953"))
+	if crooked:
+		frame.rotation.z = 0.14
+	for i in 3:
+		var figure := detail(label + "Figure", pos + Vector3((i - 1) * 0.18, -0.04, 0.04), Vector3(0.10, 0.24 - i * 0.04, 0.02), Color("b2a18b"))
+		figure.reparent(frame, true)
+		var head := detail(label + "Head", pos + Vector3((i - 1) * 0.18, 0.14 - i * 0.02, 0.04), Vector3(0.09, 0.09, 0.02), Color("b2a18b"))
+		head.reparent(frame, true)
+
+func _furnish_home() -> void:
+	box("CouchBack", Vector3(-6.5, 0.85, 3), Vector3(0.25, 0.8, 3.1))
+	for z in [1.65, 4.35]:
+		box("CouchArm", Vector3(-6, 0.65, z), Vector3(1.4, 0.3, 0.25))
+	_table("CoffeeTable", Vector3(-3.8, 0.3, 3), Vector3(1.1, 0.6, 1.8))
+	box("TelevisionCabinet", Vector3(-2, 0.4, 0.5), Vector3(1.8, 0.8, 0.6))
+	box("OldTelevision", Vector3(-2, 1.1, 0.5), Vector3(1.05, 0.65, 0.55))
+	detail("GlassScreen", Vector3(-2, 1.1, 0.8), Vector3(0.85, 0.45, 0.03), Color("687e7b"))
+	for z in [2.1, 3.0, 3.9]:
+		detail("WornCushion", Vector3(-5.9, 1.01, z), Vector3(0.9, 0.05, 0.8), Color("858879"))
+	box("FamilyRoomRug", Vector3(-10, 0.025, 2), Vector3(2.6, 0.05, 4), S.CARPET)
+	box("ReadingBench", Vector3(-11.3, 0.45, 2), Vector3(0.7, 0.9, 2))
+	box("FamilyBookshelf", Vector3(-10, 0.9, -3.5), Vector3(2, 1.8, 0.4))
+	box("Refrigerator", Vector3(7.1, 1, -3.2), Vector3(1.2, 2, 1.1))
+	box("CounterReturn", Vector3(7.2, 0.5, -5.6), Vector3(1.1, 1, 3.2))
+	for x in [5.2, 6.5]:
+		box("WallCabinet", Vector3(x, 2.1, -7.4), Vector3(1.15, 0.7, 0.6))
+	_table("DiningTable", Vector3(2.8, 0.4, -4.8), Vector3(1.5, 0.8, 2.2))
+	for z in [-6.3, -3.3]:
+		box("DiningChair", Vector3(2.8, 0.25, z), Vector3(0.6, 0.5, 0.6))
+		detail("ChairBack", Vector3(2.8, 0.8, z), Vector3(0.6, 0.6, 0.12), Color("927452"))
+	for x in [2.4, 3.2]:
+		detail("DinnerPlate", Vector3(x, 0.82, -4.8), Vector3(0.3, 0.025, 0.3), Color("c6bba2"))
+	box("ChildDresser", Vector3(-6.8, 3.5, -3.4), Vector3(1.4, 1, 0.7))
+	box("ChildBookshelf", Vector3(-2.8, 3.8, -7.4), Vector3(1.5, 1.6, 0.4))
+	detail("BedPillow", Vector3(-5, 3.88, -7), Vector3(1.5, 0.15, 0.5), Color("9192ab"))
+	detail("BedQuilt", Vector3(-5, 3.83, -5.6), Vector3(2.02, 0.08, 1.8), Color("7b839c"))
+	for i in 5:
+		detail("ToyBlock", Vector3(-3.2 + i * 0.22, 3.12, -4.5), Vector3(0.18, 0.18, 0.18), Color("ac796c"))
+	box("StudyRug", Vector3(4, 3.025, -5), Vector3(4, 0.05, 3), S.CARPET)
+	_table("HomeworkDesk", Vector3(6.5, 3.4, -6.8), Vector3(2, 0.8, 1))
+	box("CornerFacingChair", Vector3(7.2, 3.45, -4.6), Vector3(0.6, 0.9, 0.6))
+	var partition := get_node("BedroomPartitionRight") as StaticBody3D
+	partition.position.x = 1.5
+	(partition.get_child(0).shape as BoxShape3D).size.x = 3.0
+	if DisplayServer.get_name() != "headless":
+		((partition.get_child(1) as MeshInstance3D).mesh as BoxMesh).size.x = 3.0
+	box("StudyDoorPier", Vector3(6.5, 4.5, -2), Vector3(3, 3, 0.15))
+	box("StudyDoorLintel", Vector3(4, 5.75, -2), Vector3(2, 0.5, 0.15))
+	for i in 4:
+		_picture("FamilyPhoto", Vector3(-5.8 + i * 1.1, 1.9, -0.35), i == 2)
+		_picture("ChildDrawing", Vector3(-5.5 + i * 1.4, 4.8, -7.85), i == 1)
+	for i in 8:
+		detail("OldBook", Vector3(-10.8 + i * 0.22, 1.1, -3.22), Vector3(0.15, 0.45, 0.16), Color("8f9d87"))
+	for i in 15:
+		var z := 6.85 - i * (5.0 / 15.0)
+		var y := 1.4 + (4.5 - z) * 0.6 + 0.12
+		detail("StairTread", Vector3(6, y, z), Vector3(1.95, 0.025, 0.045), Color("9c8469"))
+	detail("CornerChairBack", Vector3(7.2, 4.1, -4.3), Vector3(0.6, 0.6, 0.12), Color("927452"))
+	for y in [3.25, 3.55, 3.85]:
+		detail("DresserDrawer", Vector3(-6.8, y, -3.02), Vector3(1.2, 0.2, 0.04), Color("917456"))
+	# Original low-poly brass key silhouette, parented for atomic pickup visibility.
+	for entry in [[Vector3(-0.12, 0, 0), Vector3(0.14, 0.14, 0.22)], [Vector3(0.1, 0, 0), Vector3(0.3, 0.06, 0.06)], [Vector3(0.18, 0, 0.06), Vector3(0.05, 0.06, 0.1)]]:
+		var part := detail("KeyDetail", key.position + entry[0], entry[1], Color("e9ba63"))
+		part.reparent(key, true)
+		if DisplayServer.get_name() != "headless":
+			var key_mesh := part.get_child(1) as MeshInstance3D
+			(key_mesh.material_override as ShaderMaterial).set_shader_parameter("surface_fill_boost", 0.65)
+			if entry[0].x < 0:
+				var bow := TorusMesh.new()
+				bow.inner_radius = 0.045
+				bow.outer_radius = 0.11
+				bow.rings = 16
+				bow.ring_segments = 8
+				key_mesh.mesh = bow
+	if DisplayServer.get_name() != "headless":
+		(key.get_child(1) as MeshInstance3D).hide()
+
+func _build_feedback_sound() -> void:
+	# Original short mechanical click. Presentation only; existing noise contracts stay intact.
+	var stream := AudioStreamWAV.new()
+	stream.format = AudioStreamWAV.FORMAT_8_BITS
+	stream.mix_rate = 22050
+	var samples := PackedByteArray()
+	for i in 2205:
+		var t := float(i) / 22050.0
+		var sample := sin(TAU * 730.0 * t) * exp(-t * 65.0) * 70.0
+		samples.append(int(sample) & 255)
+	stream.data = samples
+	feedback_sound = AudioStreamPlayer.new()
+	feedback_sound.stream = stream
+	feedback_sound.volume_db = -16.0
+	add_child(feedback_sound)
+
+func _table(label: String, pos: Vector3, size: Vector3) -> void:
+	var body := box(label, pos, size)
+	if DisplayServer.get_name() != "headless":
+		var mesh := body.get_child(1) as MeshInstance3D
+		(mesh.mesh as BoxMesh).size.y = 0.12
+		mesh.position.y = size.y / 2.0 - 0.06
+	for x in [-1, 1]:
+		for z in [-1, 1]:
+			detail(label + "Leg", pos + Vector3(x * (size.x / 2.0 - 0.12), -0.06, z * (size.z / 2.0 - 0.12)), Vector3(0.12, size.y - 0.12, 0.12), Color("927452"))

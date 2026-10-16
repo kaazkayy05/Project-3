@@ -111,6 +111,34 @@ func run() -> void:
 	await place(Vector3(-4.7, 0.1, -3))
 	player.camera.look_at(demo.key.global_position)
 	check(player.aimed_interaction() == &"brass_key", "Key can be targeted with existing demo interaction ray")
+	for approach in [Vector3(-4.6, 0.1, -2.3), Vector3(-4.6, 0.1, -3.7), Vector3(-6, 0.1, -1.3)]:
+		await place(approach)
+		player.camera.look_at(demo.key.global_position + Vector3(0.4, 0.1, 0))
+		check(player.aimed_interaction() == &"brass_key", "Forgiving key cone from " + str(approach))
+	await place(Vector3(-4.6, 0.1, -3))
+	player.camera.look_at(demo.key.global_position)
+	var obstruction: StaticBody3D = demo.box("TestOccluder", Vector3(-5.2, 1.25, -3), Vector3(0.15, 2.5, 2))
+	await physics_frame
+	await physics_frame
+	check(player.aimed_interaction() == &"", "Solid furniture blocks key targeting")
+	obstruction.queue_free()
+	await physics_frame
+	await place(Vector3(-4.7, 0.1, -3))
+	player.camera.global_position.y = 0.45
+	player.camera.look_at(demo.key.global_position)
+	check(player.aimed_interaction() == &"", "Sideboard blocks pickup from below")
+	player.camera.position.y = 1.55
+	for target in [Vector3(-10, 0.1, 4), Vector3(-10, 0.1, -2.8), Vector3(4, 3.1, -4)]:
+		var route := NavigationServer3D.map_get_path(navigation_map, ground_start, target, true)
+		check(path_reaches_target(route, navigation_map, target), "Navigation reaches new playable space " + str(target))
+	await place(Vector3(-10, 0.1, 4))
+	await walk(Vector3.FORWARD, 150)
+	check(player.position.z < -1.5 and player.position.y > -0.1, "Family-room loop has continuous floor collision")
+	await place(Vector3(0, 0.1, 6.5))
+	player.camera.look_at(demo.deadbolt.global_position)
+	check(player.aimed_interaction() == &"deadbolt", "Front deadbolt wins targeting over door")
+	check(demo.environment_system.interact(&"exit") == "The deadbolt is still locked.", "Locked door explains the deadbolt")
+	check(demo.environment_system.interaction_prompt(&"brass_key") == "Press E to Pick Up Key", "Key has contextual E prompt")
 	await place(Vector3(-3, 0.1, -3))
 	player.camera.look_at(demo.key.global_position)
 	check(player.aimed_interaction() == &"", "Out-of-reach key cannot be targeted")
@@ -119,6 +147,10 @@ func run() -> void:
 	check(player.position.z < 8 and not demo.environment_system.has_escaped, "Locked front door physically blocks escape")
 	demo.environment_system.interact(&"brass_key")
 	demo.environment_system.interact(&"deadbolt")
+	player.camera.look_at(demo.front_door.global_position)
+	check(player.aimed_interaction() == &"exit", "Unlocked deadbolt yields targeting to separate door action")
+	check(not demo.environment_system.room_layout_state.front_door.open, "Unlocking alone leaves front door closed")
+	check(is_equal_approx(demo.bolt_thumb.rotation.z, PI / 2.0), "Deadbolt thumb visibly rotates when unlocked")
 	demo.environment_system.interact(&"exit")
 	check(demo.front_navigation_link.enabled, "Opening the front door enables its navigation link")
 	await walk(Vector3.BACK, 60)
@@ -131,6 +163,7 @@ func run() -> void:
 	check(demo.bedroom_navigation_link.enabled, "Opening the bedroom door enables its navigation link")
 	await walk(Vector3.FORWARD, 65)
 	check(player.position.z < -2.5, "Bedroom door opens into master bedroom")
+	demo.environment_system.has_escaped = false
 	# Proximity remains harmless until a player-originated acoustic event occurs.
 	demo.monster.global_position = player.global_position + Vector3(1.5, 0, 0)
 	demo.monster.publish_seam4_status()
@@ -140,7 +173,7 @@ func run() -> void:
 	check(not player.controls_enabled and not demo.breath_system.is_processing(),
 		"Game over disables player controls and breath processing")
 	demo._process(0.0)
-	check("Press R to restart" in demo.hud.text, "Game-over HUD presents the restart control")
+	check("Press R to restart" in demo.objective_label.text, "Game-over HUD presents the restart control")
 	print("HOUSE RESULT: ", failures, " failures")
 	demo.queue_free()
 	await process_frame

@@ -357,7 +357,13 @@ func run() -> void:
 	gasp_breath.update_breath(1.0)
 	check(forced_gasp_kill_count == 1, "Forced gasp kills when the monster is under two meters away")
 
+	# Flush audio playback before quitting Godot 4.3's threaded mixer.
+	for audio in root.find_children("*", "AudioStreamPlayer", true, false) + root.find_children("*", "AudioStreamPlayer3D", true, false):
+		audio.stop()
+		audio.stream = null
+	await create_timer(0.15).timeout
 	world.queue_free()
-	await process_frame
+	for frame in 3:
+		await physics_frame
 	print("MONSTER AI RESULT: %d checks, %d failures" % [checks, failures])
 	quit(1 if failures else 0)

@@ -58,10 +58,10 @@ func run() -> void:
 		acoustic.emit_footstep_noise(actor.global_position, false)
 		var event: Dictionary = acoustic.active_noise_events.back()
 		check(is_equal_approx(event.intensity, 0.25 * multiplier), "Footstep intensity %d" % surface)
-		check(is_equal_approx(event.radius, 7.2 * multiplier), "Footstep radius %d" % surface)
+		check(is_equal_approx(event.radius, acoustic.base_pulse_radius * 0.6 * multiplier), "Footstep radius %d" % surface)
 		check(acoustic.trigger_player_pulse(actor.global_position), "Pulse accepted %d" % surface)
 		event = acoustic.active_noise_events.back()
-		check(is_equal_approx(event.intensity, multiplier) and is_equal_approx(event.radius, 12.0 * multiplier), "Pulse scaling %d" % surface)
+		check(is_equal_approx(event.intensity, multiplier) and is_equal_approx(event.radius, acoustic.base_pulse_radius * multiplier), "Pulse scaling %d" % surface)
 	check(acoustic.pulse_charges == 1, "Pulse charge economy preserved")
 	# Same origin, alternate surfaces: only audible event changes probe state.
 	actor.position = Vector3(0, 0.05, 0)
@@ -79,11 +79,11 @@ func run() -> void:
 		environment_system.sample_surface(actor)
 		acoustic.emit_footstep_noise(actor.global_position, false)
 		var event: Dictionary = acoustic.active_noise_events.back()
-		check(is_equal_approx(event.intensity, 0.25) and is_equal_approx(event.radius, 7.2), "Frozen footstep identical %d" % surface)
+		check(is_equal_approx(event.intensity, 0.25) and is_equal_approx(event.radius, acoustic.base_pulse_radius * 0.6), "Frozen footstep identical %d" % surface)
 		acoustic.pulse_charges = 1
 		acoustic.trigger_player_pulse(actor.global_position)
 		event = acoustic.active_noise_events.back()
-		check(is_equal_approx(event.intensity, 1.0) and is_equal_approx(event.radius, 12.0), "Frozen pulse identical %d" % surface)
+		check(is_equal_approx(event.intensity, 1.0) and is_equal_approx(event.radius, acoustic.base_pulse_radius), "Frozen pulse identical %d" % surface)
 	environment_system.freeze_resonance = false
 	check(is_equal_approx(acoustic.current_surface_resonance, 2.0), "Unfreeze restores current floor")
 	actor.position = Vector3(100, 0, 100)

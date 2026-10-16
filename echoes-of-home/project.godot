@@ -12,11 +12,11 @@ config_version=5
 
 config/name="Echoes of Home - Environment Demo"
 run/main_scene="res://demo/main_menu.tscn"
-config/features=PackedStringArray("4.7")
+config/features=PackedStringArray("4.3")
 
 [autoload]
 
-MusicManager="*uid://dplbjrlffnajw"
+MusicManager="*res://demo/music_manager.gd"
 PauseController="*res://demo/pause_controller.gd"
 
 [display]
