@@ -66,7 +66,7 @@ func interact(action: StringName) -> String:
 			objective_progress.chain_cleared = true
 		&"exit":
 			if not can_escape():
-				return "The front door is still secured."
+				return "The deadbolt is still locked." if not objective_progress.bolt_unlocked else "Remove the door chain first."
 			room_layout_state.front_door.open = true
 		&"bedroom_door":
 			room_layout_state.bedroom_door.open = not room_layout_state.bedroom_door.open
@@ -74,7 +74,11 @@ func interact(action: StringName) -> String:
 			return ""
 	room_layout_state.front_door.locked = not can_escape()
 	objectives_changed.emit(objective_progress.duplicate(true))
-	return "Brass key collected." if action == &"brass_key" else "Done."
+	match action:
+		&"brass_key": return "Brass Key Collected. Find the front-door deadbolt."
+		&"deadbolt": return "Deadbolt unlocked. Press E on the door to open it."
+		&"exit": return "Front door open. Step outside to escape."
+	return "Done."
 
 func try_escape() -> bool:
 	if has_escaped or not can_escape() or not room_layout_state.front_door.open:
@@ -82,3 +86,12 @@ func try_escape() -> bool:
 	has_escaped = true
 	escaped.emit()
 	return true
+
+func interaction_prompt(action: StringName) -> String:
+	match action:
+		&"brass_key": return "Press E to Pick Up Key"
+		&"deadbolt": return "Deadbolt unlocked — look at the door to open it" if objective_progress.bolt_unlocked else "Press E to Unlock Deadbolt"
+		&"exit": return "Press E to Open Front Door"
+		&"bedroom_door": return "Press E to Toggle Bedroom Door"
+		&"chain": return "Press E to Remove Chain"
+	return ""

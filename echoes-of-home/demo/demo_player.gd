@@ -91,7 +91,7 @@ func _physics_process(delta: float) -> void:
 		acoustic.trigger_player_pulse(global_position)
 		pulse_requested = false
 	var action := aimed_interaction()
-	interaction_hint = "E: " + String(action).replace("_", " ") if action != &"" else ""
+	interaction_hint = environment_system.interaction_prompt(action)
 	if interaction_requested:
 		interaction_requested = false
 		if action != &"":
@@ -118,13 +118,35 @@ func set_controls_enabled(enabled: bool) -> void:
 			breath_system.call("release_breath")
 
 func aimed_interaction() -> StringName:
-	var query := PhysicsRayQueryParameters3D.create(camera.global_position,
-		camera.global_position - camera.global_basis.z * 2.2, 1, [get_rid()])
-	var hit := get_world_3d().direct_space_state.intersect_ray(query)
-	if not hit.is_empty() and hit.collider.has_meta("interaction"):
-		return hit.collider.get_meta("interaction")
-	return &""
-	
+	var origin := camera.global_position
+	var forward := -camera.global_basis.z
+	var best: StringName = &""
+	var best_score := -INF
+	for target in get_tree().get_nodes_in_group("house_interactables"):
+		if not target is StaticBody3D or not target.visible:
+			continue
+		var offset: Vector3 = target.global_position - origin
+		var distance := offset.length()
+		if distance > 2.2 or distance < 0.01:
+			continue
+		var alignment := forward.dot(offset.normalized())
+		if alignment < cos(deg_to_rad(24.0)):
+			continue
+		var query := PhysicsRayQueryParameters3D.create(origin, target.global_position, 1, [get_rid()])
+		var hit := get_world_3d().direct_space_state.intersect_ray(query)
+		if hit.is_empty() or hit.collider != target:
+			continue
+		var action: StringName = target.get_meta("interaction")
+		if action == &"deadbolt" and environment_system.objective_progress.bolt_unlocked:
+			continue
+		var score := alignment - distance * 0.025
+		if action in [&"brass_key", &"deadbolt", &"chain"]:
+			score += 0.12
+		if score > best_score:
+			best_score = score
+			best = action
+	return best
+
 func on_player_gasp() -> void:
 	breath_locked = true
 

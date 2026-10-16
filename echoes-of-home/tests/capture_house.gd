@@ -16,5 +16,25 @@ func capture() -> void:
 	await process_frame
 	await RenderingServer.frame_post_draw
 	root.get_texture().get_image().save_png("user://environment_pulse.png")
+	demo.monster.set_physics_process(false)
+	var views := [
+		["living", Vector3(-0.8, 1.65, 5.8), Vector3(-5, 1.2, 2)],
+		["family", Vector3(-9, 1.65, 5), Vector3(-10, 1.0, -2)],
+		["kitchen", Vector3(0, 1.65, -1.2), Vector3(4, 1, -5)],
+		["childhood", Vector3(-1.8, 4.65, -3), Vector3(-5, 4.3, -6)],
+		["key", Vector3(-4.5, 1.65, -2.5), demo.key.global_position],
+		["deadbolt", Vector3(0, 1.65, 6.5), demo.deadbolt.global_position],
+	]
+	for view in views:
+		demo.player.position = view[1] - Vector3.UP * 1.55
+		demo.player.camera.look_at(view[2])
+		demo.player.interaction_hint = demo.environment_system.interaction_prompt(demo.player.aimed_interaction())
+		demo.acoustic.pulse_origin = demo.player.position
+		demo.acoustic.is_pulse_active = true
+		demo.acoustic.pulse_radius = 12.0
+		await process_frame
+		await process_frame
+		await RenderingServer.frame_post_draw
+		root.get_texture().get_image().save_png("user://environment_" + view[0] + ".png")
 	print("Visual captures: ", OS.get_user_data_dir())
 	quit()
