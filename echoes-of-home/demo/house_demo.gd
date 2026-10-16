@@ -255,7 +255,7 @@ func _process(delta: float) -> void:
 		material.set_shader_parameter("pulse_radius", acoustic.pulse_radius)
 		material.set_shader_parameter("pulse_active", pulse_afterglow > 0.0)
 		material.set_shader_parameter("fade", pulse_afterglow / 0.6)
-	hud.text = "ECHOES OF HOME\nWASD move | Mouse look | Space echo | E interact | Shift sprint | Left Ctrl hold breath | Esc cursor\nPulses: %d / 5\n%s" % [acoustic.pulse_charges, player.message]
+	hud.text = "ECHOES OF HOME\nWASD move | Mouse look | Space echo | E interact | Shift sprint | Left Ctrl hold breath | Esc pause/unpause\nPulses: %d / 5\n%s" % [acoustic.pulse_charges, player.message]
 	hud.text += "\n" + player.interaction_hint
 	if is_instance_valid(breath_system):
 		hud.text += "\nBreath: %.0f%% | Panic: %.0f%% | Heart: %d BPM" % [
