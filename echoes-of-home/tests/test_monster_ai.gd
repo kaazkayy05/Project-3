@@ -82,6 +82,8 @@ func run() -> void:
 	check(scene_monster != null, "Monster scene root is a CharacterBody3D")
 	check(scene_monster.get_node_or_null("CollisionShape3D") is CollisionShape3D, "Monster scene has a collision shape")
 	check(scene_monster.get_node_or_null("NavigationAgent3D") is NavigationAgent3D, "Monster scene has a NavigationAgent3D")
+	var scene_warning := scene_monster.get_node_or_null("ApproachWarning") as AudioStreamPlayer3D
+	check(scene_warning != null and scene_warning.stream != null, "Monster scene has a spatial approach warning sound")
 	var scene_shape := scene_monster.get_node("CollisionShape3D") as CollisionShape3D
 	check(scene_shape.shape is CapsuleShape3D, "Monster collision uses a capsule")
 	var scene_visual := scene_monster.get_node_or_null("EchoVisual") as Node3D
@@ -92,6 +94,16 @@ func run() -> void:
 		visual_parts_have_meshes = visual_parts_have_meshes and part is MeshInstance3D
 	check(visual_parts_have_meshes, "Every humanoid visual part is renderable geometry")
 	check(not scene_visual.visible, "Monster echo visual starts hidden in darkness")
+	var physical_visual := scene_monster.get_node_or_null("PhysicalVisual") as MonsterPresentation
+	check(physical_visual != null and physical_visual.visible, "Monster has a persistent 3D physical silhouette")
+	check(physical_visual.find_children("*", "MeshInstance3D", true, false).size() >= 8,
+		"Physical silhouette uses a complete primitive-mesh body")
+	check(scene_monster.get_node_or_null("PhysicalVisual/BodyRoot/Eyes/LeftEye") is MeshInstance3D,
+		"Physical silhouette has emissive eye geometry")
+	var scene_jumpscare := scene_monster.get_node_or_null("Jumpscare") as MonsterJumpscare
+	check(scene_jumpscare != null, "Monster scene owns its jumpscare controller")
+	check(scene_jumpscare.get_node_or_null("ScareRig") is Node3D,
+		"Jumpscare includes a dedicated close-camera 3D rig")
 	scene_monster.queue_free()
 
 	acoustic = AcousticPulseSystem.new()
@@ -137,6 +149,8 @@ func run() -> void:
 
 	check(monster.monster_state == MonsterAI.State.DORMANT, "Monster starts dormant")
 	check(MonsterAI.State.size() == 4, "Monster exposes all four required states")
+	check(is_equal_approx(monster.investigation_speed, 3.0), "Normal investigation speed is balanced to 3 m/s")
+	check(is_equal_approx(monster.hunting_speed, 4.5), "Hunting speed is balanced to 4.5 m/s")
 
 	emit_noise(Vector3(1, 0, 0), 0.2, 10.0)
 	check(monster.monster_state == MonsterAI.State.DORMANT, "Noise below hearing threshold is ignored")
@@ -150,12 +164,19 @@ func run() -> void:
 	check(monster.investigation_target == first_origin, "Investigation target is the exact noise origin")
 	var moderate_aggro := monster.aggro_level
 	var moderate_speed := monster.current_speed
+	var immediate_footstep := Vector3(4, 0, -2)
+	emit_noise(immediate_footstep, 0.6, 8.0)
+	check(monster.investigation_target == first_origin, "Repeated footsteps cannot continuously replace the target")
+	monster._process(monster.target_update_cooldown + 0.01)
+	var later_footstep := Vector3(5, 0, -2)
+	emit_noise(later_footstep, 0.6, 8.0)
+	check(monster.investigation_target == later_footstep, "A significant sound can refresh the target after cooldown")
 
 	# Time does not count down until navigation has brought the monster to the
 	# fixed event origin.
 	monster._process(3.0)
 	check(monster.monster_state == MonsterAI.State.INVESTIGATING, "Investigation wait does not start before arrival")
-	monster.global_position = first_origin
+	monster.global_position = later_footstep
 	monster._process(2.49)
 	check(monster.monster_state == MonsterAI.State.INVESTIGATING, "Monster waits at the origin for 2.5 seconds")
 	monster._process(0.02)
@@ -167,8 +188,19 @@ func run() -> void:
 	check(monster.monster_state == MonsterAI.State.HUNTING, "Strong audible noise enters hunting state")
 	check(monster.aggro_level > moderate_aggro, "Stronger sound increases aggression")
 	check(monster.current_speed > moderate_speed, "Stronger sound increases current speed")
+	check(is_equal_approx(monster.current_speed, monster.hunting_speed), "Hunting uses the configured hunting speed")
 	check(monster.investigation_target == strong_origin, "Hunting remains anchored to the sound origin")
+	monster._process(monster.pursuit_timeout - 0.01)
+	check(monster.monster_state == MonsterAI.State.HUNTING, "Hunt remains active until the pursuit timeout")
+	monster._process(0.02)
+	check(monster.monster_state == MonsterAI.State.INVESTIGATING, "Expired hunt investigates the last known location")
+	check(monster.investigation_target == strong_origin, "Pursuit timeout preserves the last known location")
+	check(is_equal_approx(monster.current_speed, monster.investigation_speed), "Timed-out pursuit returns to normal speed")
+	monster.global_position = strong_origin
+	monster._process(monster.investigation_duration + 0.01)
+	check(monster.monster_state == MonsterAI.State.DORMANT, "Finished post-hunt investigation returns to default behavior")
 
+	monster.global_position = Vector3.ZERO
 	monster.update_kill_proximity(Vector3(1.9, 0, 0))
 	check(monster.kill_proximity_active, "Kill proximity activates within two meters")
 	monster.update_kill_proximity(Vector3(2.1, 0, 0))
@@ -243,6 +275,42 @@ func run() -> void:
 	check(monster.get_monster_world_position() == published_monster_position, "Read-only position interface matches the signal")
 	check(monster.get_monster_state() == published_monster_state, "Read-only state interface matches the signal")
 	check(is_equal_approx(breath_system.monster_distance, 10.0), "Far monster distance reaches the breath system")
+	check(monster.is_player_holding_breath() == breath_system.is_holding_breath, "Monster reads the real breath-system state")
+
+	# Passive breathing is a short-range sound generated on the Monster AI side.
+	# It obeys the hearing threshold and never replaces the teammate-owned state.
+	monster.global_position = Vector3(2.5, 0, 0)
+	monster.reset_to_default()
+	breath_system.hold_breath()
+	check(monster.is_player_holding_breath(), "Monster sees the breath system's held state")
+	monster._breathing_detection_time_remaining = 0.0
+	monster._process(monster.breathing_detection_interval + 0.01)
+	check(monster.monster_state == MonsterAI.State.DORMANT, "Holding breath prevents breathing-related detection")
+	breath_system.release_breath()
+	monster._breathing_detection_time_remaining = 0.0
+	monster._process(monster.breathing_detection_interval + 0.01)
+	check(monster.monster_state == MonsterAI.State.INVESTIGATING, "Normal close breathing is detected")
+	check(monster.investigation_target == player.global_position, "Breathing detection snapshots the player's current location")
+	monster.reset_to_default()
+	var normal_hearing_threshold := monster.hearing_threshold
+	monster.hearing_threshold = monster.breathing_noise_intensity + 0.01
+	monster._breathing_detection_time_remaining = 0.0
+	monster._process(monster.breathing_detection_interval + 0.01)
+	check(monster.monster_state == MonsterAI.State.DORMANT, "Breathing below the hearing threshold is ignored")
+	monster.hearing_threshold = normal_hearing_threshold
+	breath_system.hold_breath()
+	acoustic.emit_footstep_noise(player.global_position, true)
+	check(monster.monster_state == MonsterAI.State.INVESTIGATING, "Holding breath does not suppress sprint footsteps")
+	check(monster.investigation_target == player.global_position, "Sprint footsteps still attract the monster to their origin")
+	monster.reset_to_default()
+	check(acoustic.trigger_player_pulse(player.global_position), "Player pulse can fire while breath is held")
+	check(monster.monster_state == MonsterAI.State.INVESTIGATING, "Holding breath does not suppress player pulse noise")
+	monster.reset_to_default()
+	emit_noise(player.global_position, 1.4, 12.0)
+	check(monster.monster_state == MonsterAI.State.HUNTING, "Holding breath does not suppress loud acoustic noise")
+	monster.reset_to_default()
+	monster.global_position = Vector3(10, 0, 0)
+	monster.publish_seam4_status()
 
 	var publications_before_state_change := seam4_publish_count
 	emit_noise(Vector3(11, 0, 0), 0.6, 4.0)
@@ -288,12 +356,19 @@ func run() -> void:
 	check(is_equal_approx(breath_system.lung_capacity, 55.0), "Frozen-far position keeps relaxed breath drain for three seconds")
 
 	# GDD kill rule: proximity/overlap only arms the monster. A player-originated
-	# acoustic event must occur while the current distance is strictly under 2 m.
+	# audible acoustic event must occur during a hunt while distance is under 2 m.
 	monster.player_killed.connect(on_player_killed)
+	monster.reset_to_default()
 	monster.global_position = Vector3(1.5, 0, 0)
 	monster.publish_seam4_status()
 	check(monster.kill_proximity_active, "Silent close proximity arms the kill rule")
 	check(player_kill_count == 0, "Silent close proximity does not kill")
+	emit_noise(player.global_position, 0.2, 12.0)
+	check(player_kill_count == 0, "Quiet close-range noise below threshold does not kill")
+	check(monster.monster_state == MonsterAI.State.DORMANT, "Quiet close-range noise does not alert the monster")
+	emit_noise(player.global_position, 0.6, 12.0)
+	check(player_kill_count == 0, "Investigating without an active hunt does not cause a proximity kill")
+	monster.reset_to_default()
 
 	monster.global_position = player.global_position
 	monster.publish_seam4_status()
@@ -308,8 +383,9 @@ func run() -> void:
 	check(player_kill_count == 0, "Exact two-meter boundary does not kill")
 
 	monster.global_position = Vector3(1.5, 0, 0)
-	emit_noise(Vector3(8, 0, 0), 1.0, 12.0)
+	emit_noise(Vector3(8, 0, 0), 1.5, 12.0)
 	check(player_kill_count == 0, "Non-player noise does not kill at close range")
+	check(monster.monster_state == MonsterAI.State.HUNTING, "Loud non-player noise can still create a valid hunt")
 
 	monster.global_position = Vector3(1.5, 0, 0)
 	var target_before_kill := monster.investigation_target

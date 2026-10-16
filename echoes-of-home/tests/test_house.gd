@@ -49,6 +49,19 @@ func run() -> void:
 	check(is_instance_valid(demo.monster), "Playable house spawns monster.tscn")
 	check(demo.monster.acoustic_system == demo.acoustic, "Seam 1 binds the house acoustic system to Monster AI")
 	check(player.breath_system == demo.breath_system, "Player and Monster AI share the house breath system")
+	# Headless Godot dispatches parsed mouse events but intentionally does not
+	# mutate Input.is_mouse_button_pressed(). Guard the production input mapping
+	# as source, then exercise the same real breath object through the seam.
+	var player_source := FileAccess.get_file_as_string("res://demo/demo_player.gd")
+	check(
+		"Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)" in player_source
+		and "breath_system.call(\"hold_breath\")" in player_source
+		and "breath_system.call(\"release_breath\")" in player_source,
+		"Player maps right mouse hold/release to the real breath system")
+	demo.breath_system.hold_breath()
+	check(demo.monster.is_player_holding_breath(), "House Monster AI reads the player's real held-breath state")
+	demo.breath_system.release_breath()
+	check(not demo.breath_system.is_holding_breath, "Releasing right mouse releases breath")
 	var navigation_map: RID = demo.monster.navigation_agent.get_navigation_map()
 	var ground_start := Vector3(0, 0.1, 4)
 	var ramp_bottom := Vector3(6, 0.4, 6.6)
@@ -90,6 +103,7 @@ func run() -> void:
 		"Seam 4 publishes live monster-to-player distance to breath control")
 	# The remaining legacy geometry checks move the player manually. Freeze the
 	# monster so it cannot interfere with those deterministic collision checks.
+	demo.monster.reset_to_default()
 	demo.monster.set_process(false)
 	demo.monster.set_physics_process(false)
 	await place(Vector3(0, 0.1, 6))
@@ -145,6 +159,8 @@ func run() -> void:
 	await place(Vector3(0, 0.1, 6.5))
 	await walk(Vector3.BACK, 70)
 	check(player.position.z < 8 and not demo.environment_system.has_escaped, "Locked front door physically blocks escape")
+	var objective_noise_count: int = demo.acoustic.active_noise_events.size()
+	var objective_monster_state: int = demo.monster.monster_state
 	demo.environment_system.interact(&"brass_key")
 	demo.environment_system.interact(&"deadbolt")
 	player.camera.look_at(demo.front_door.global_position)
@@ -156,6 +172,10 @@ func run() -> void:
 	await walk(Vector3.BACK, 60)
 	check(demo.environment_system.has_escaped, "Open front door permits crossing exit area")
 	check(not demo.key.visible and demo.key.get_child(0).disabled, "Collected key disappears and stops blocking rays")
+	check(demo.acoustic.active_noise_events.size() == objective_noise_count,
+		"Key, deadbolt, door, and escape interactions do not fabricate acoustic events")
+	check(demo.monster.monster_state == objective_monster_state,
+		"Objective interactions do not unfairly alert the monster")
 	check(not demo.monster.is_physics_processing() and not demo.breath_system.is_processing(), "Escape safely stops pursuit and breath gameplay")
 	check(not demo.pulse_label.visible and not demo.breath_bar.visible, "Escape removes gameplay meters")
 	check(demo.get_node("Porch").get_child(0).shape.size.x >= 10.0, "Exit has a full-width furnished porch")
@@ -202,10 +222,16 @@ func run() -> void:
 	demo.monster.global_position = player.global_position + Vector3(1.5, 0, 0)
 	demo.monster.publish_seam4_status()
 	check(not demo.game_over, "Close monster proximity alone does not end the game")
-	demo.acoustic.noise_emitted.emit(player.global_position, 1.0, 12.0)
+	demo.acoustic.noise_emitted.emit(player.global_position, 1.5, 12.0)
 	check(demo.game_over, "Monster player_killed signal enters the game-over state")
 	check(not player.controls_enabled and not demo.breath_system.is_processing(),
 		"Game over disables player controls and breath processing")
+	check(demo.monster.is_jumpscare_active(), "Successful monster kill starts the jumpscare")
+	check(not demo.death_overlay.visible, "Normal game-over overlay waits for the jumpscare")
+	await create_timer(demo.monster.get_jumpscare_duration() + 0.1).timeout
+	check(not demo.monster.is_jumpscare_active(), "Jumpscare finishes after its short presentation")
+	check(demo.death_overlay.visible, "Normal game-over overlay appears after the jumpscare")
+	check(demo.death_sound.playing, "Normal game-over audio plays after the jumpscare")
 	demo._process(0.0)
 	check("Press R to restart" in demo.objective_label.text, "Game-over HUD presents the restart control")
 	demo.queue_free()

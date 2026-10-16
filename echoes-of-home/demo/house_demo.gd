@@ -467,6 +467,11 @@ func _on_player_killed(_noise_origin: Vector3, _intensity: float) -> void:
 	breath_system.call("release_breath")
 	breath_system.set_process(false)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	var jumpscare_duration := monster.get_jumpscare_duration()
+	if jumpscare_duration > 0.0:
+		await get_tree().create_timer(jumpscare_duration).timeout
+	if not game_over or environment_system.has_escaped:
+		return
 	death_overlay.show()
 	death_sound.play()
 
