@@ -80,7 +80,13 @@ func _physics_process(delta: float) -> void:
 		step_distance += Vector2(global_position.x - previous.x, global_position.z - previous.z).length()
 		if step_distance >= 0.9:
 			step_distance = 0.0
-			acoustic.emit_footstep_noise(global_position, sprinting)
+			var quiet_walk := (
+				is_instance_valid(breath_system)
+				and bool(breath_system.get("is_holding_breath"))
+				and not sprinting
+			)
+			if not quiet_walk:
+				acoustic.emit_footstep_noise(global_position, sprinting)
 			if is_on_floor():
 				footsteps.play()
 			if environment_system.current_surface_type == HouseEnvironmentSystem.Surface.CLUTTER:
