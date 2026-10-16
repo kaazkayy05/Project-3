@@ -19,7 +19,7 @@ enum State {
 @export_group("Hearing")
 @export var hearing_threshold: float = 0.3
 @export var full_aggro_intensity: float = 1.5
-@export_range(0.0, 1.0) var hunting_aggro_threshold: float = 0.65
+@export_range(0.0, 1.0) var hunting_aggro_threshold: float = 0.85
 
 @export_group("Investigation")
 @export var investigation_duration: float = 2.5
