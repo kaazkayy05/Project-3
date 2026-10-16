@@ -3,11 +3,10 @@ extends CharacterBody3D
 var environment_system: HouseEnvironmentSystem
 var acoustic: AcousticPulseSystem
 var sanity_breath: Node
-var breath_label: Label
-var breath_bar: ProgressBar
 var breath_locked: bool = false
 var breath_system: Node
 var creak: AudioStreamPlayer3D
+var footsteps: AudioStreamPlayer
 var camera: Camera3D
 var step_distance: float = 0.0
 var pulse_requested: bool = false
@@ -32,35 +31,13 @@ func _ready() -> void:
 	creak = AudioStreamPlayer3D.new()
 	creak.stream = preload("res://demo/audio/floor_creak.wav")
 	add_child(creak)
+	footsteps = AudioStreamPlayer.new()
+	footsteps.stream = preload("res://demo/audio/footsteps.wav")
+	footsteps.volume_db = -6.0
+	footsteps.max_polyphony = 1
+	add_child(footsteps)
 	floor_snap_length = 0.3
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-		# Create the breathing system
-	sanity_breath = preload(
-		"res://systems/sanity_breath/sanity_breath_system.gd"
-	).new()
-
-	sanity_breath.name = "SanityBreath"
-	add_child(sanity_breath)
-
-	sanity_breath.gasp_triggered.connect(on_player_gasp)
-
-	# Create the breathing HUD
-	var hud = CanvasLayer.new()
-	add_child(hud)
-
-	breath_label = Label.new()
-	breath_label.position = Vector2(20, 115)
-	breath_label.text = "BREATH: 100%"
-	hud.add_child(breath_label)
-
-	breath_bar = ProgressBar.new()
-	breath_bar.position = Vector2(20, 140)
-	breath_bar.size = Vector2(200, 20)
-	breath_bar.min_value = 0
-	breath_bar.max_value = 100
-	breath_bar.value = 100
-	breath_bar.show_percentage = false
-	hud.add_child(breath_bar)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not controls_enabled:
@@ -80,6 +57,7 @@ func _unhandled_input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if not controls_enabled or environment_system.has_escaped:
 		velocity = Vector3.ZERO
+		footsteps.stop()
 		if is_instance_valid(breath_system):
 			breath_system.call("release_breath")
 		return
@@ -96,11 +74,15 @@ func _physics_process(delta: float) -> void:
 	var previous := global_position
 	move_and_slide()
 	var grounded := environment_system.sample_surface(self)
+	if not is_on_floor():
+		footsteps.stop()
 	if grounded:
 		step_distance += Vector2(global_position.x - previous.x, global_position.z - previous.z).length()
 		if step_distance >= 0.9:
 			step_distance = 0.0
 			acoustic.emit_footstep_noise(global_position, sprinting)
+			if is_on_floor():
+				footsteps.play()
 			if environment_system.current_surface_type == HouseEnvironmentSystem.Surface.CLUTTER:
 				creak.play()
 	else:
@@ -119,7 +101,7 @@ func _physics_process(delta: float) -> void:
 func _update_breath_input() -> void:
 	if not is_instance_valid(breath_system):
 		return
-	if Input.is_physical_key_pressed(KEY_CTRL):
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
 		breath_system.call("hold_breath")
 	else:
 		breath_system.call("release_breath")
@@ -128,6 +110,7 @@ func _update_breath_input() -> void:
 func set_controls_enabled(enabled: bool) -> void:
 	controls_enabled = enabled
 	if not controls_enabled:
+		footsteps.stop()
 		velocity = Vector3.ZERO
 		pulse_requested = false
 		interaction_requested = false
@@ -146,16 +129,3 @@ func on_player_gasp() -> void:
 	breath_locked = true
 
 	print("PLAYER GASPED!")
-
-	if acoustic != null:
-		acoustic.trigger_involuntary_gasp(global_position)
-		
-func _process(_delta: float) -> void:
-	if sanity_breath == null:
-		return
-
-	breath_label.text = "BREATH: " + str(
-		int(sanity_breath.lung_capacity)
-	) + "%"
-
-	breath_bar.value = sanity_breath.lung_capacity

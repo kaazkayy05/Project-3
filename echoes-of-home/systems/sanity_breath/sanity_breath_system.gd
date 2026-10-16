@@ -16,6 +16,10 @@ var heart_rate_bpm: int = 60
 var breath_drain_rate: float = 15.0
 var breath_recovery_rate: float = 10.0
 var monster_distance: float = 100.0
+var monster_world_position: Vector3 = Vector3.ZERO
+var monster_state: int = 0
+var _seam4_player: Node3D
+var _has_monster_snapshot: bool = false
 
 var heartbeat_sound: AudioStreamPlayer
 var gasp_sound: AudioStreamPlayer
@@ -56,6 +60,7 @@ func update_audio():
 		heartbeat_sound.stop()
 
 func update_breath(delta):
+	_refresh_monster_distance()
 	if is_holding_breath:
 		lung_capacity -= breath_drain_rate * delta
 
@@ -73,6 +78,7 @@ func update_breath(delta):
 
 
 func update_panic(delta):
+	_refresh_monster_distance()
 	if monster_distance < 4.0:
 		panic_level += 0.4 * delta
 	else:
@@ -103,4 +109,25 @@ func trigger_gasp():
 
 
 func set_monster_distance(distance: float):
+	if is_instance_valid(_seam4_player):
+		return
 	monster_distance = distance
+
+
+func bind_seam4_player(player: Node3D) -> void:
+	_seam4_player = player
+	_refresh_monster_distance()
+
+
+func receive_monster_status(position: Vector3, state: int) -> void:
+	monster_world_position = position
+	monster_state = state
+	_has_monster_snapshot = true
+	_refresh_monster_distance()
+
+
+func _refresh_monster_distance() -> void:
+	if is_instance_valid(_seam4_player) and _has_monster_snapshot:
+		monster_distance = _seam4_player.global_position.distance_to(
+			monster_world_position
+		)
