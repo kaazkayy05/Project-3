@@ -21,6 +21,11 @@ signal pulse_ended()
 @export var base_pulse_radius: float = 36.0
 @export var base_pulse_speed: float = 8.0
 
+@export_group("Noise Emission Tuning")
+@export var base_pulse_noise_radius: float = 12.0
+@export var base_footstep_noise_radius: float = 5.0
+@export var base_gasp_noise_radius: float = 14.0
+
 var pulse_charges: int = 5
 var is_pulse_active: bool = false
 var pulse_origin: Vector3 = Vector3.ZERO
@@ -66,8 +71,10 @@ func trigger_player_pulse(player_global_pos: Vector3) -> bool:
 	
 	pulse_started.emit(pulse_origin, effective_radius, duration)
 	
-	# Rule 1 / Seam 1: broadcast sound event
-	_dispatch_noise_event(pulse_origin, 1.0 * current_surface_resonance, effective_radius)
+	# Decoupled pulse audio: lower intensity keeps monster in investigation state rather than hunting
+	var pulse_noise_radius: float = base_pulse_noise_radius * current_surface_resonance
+	var pulse_noise_intensity: float = 0.45 * current_surface_resonance
+	_dispatch_noise_event(pulse_origin, pulse_noise_intensity, pulse_noise_radius)
 	return true
 
 
@@ -103,14 +110,15 @@ func set_surface_resonance(multiplier: float) -> void:
 ## Seam 3 (Kayla): Involuntary gasp when lung stamina hits 0
 func trigger_involuntary_gasp(player_global_pos: Vector3) -> void:
 	var gasp_intensity: float = 1.5 * current_surface_resonance
-	var gasp_radius: float = base_pulse_radius * 1.2
+	var gasp_radius: float = base_gasp_noise_radius * current_surface_resonance
 	_dispatch_noise_event(player_global_pos, gasp_intensity, gasp_radius)
 
 
 func emit_footstep_noise(step_global_pos: Vector3, is_sprinting: bool) -> void:
 	var base_intensity: float = 0.7 if is_sprinting else 0.25
 	var effective_intensity: float = base_intensity * current_surface_resonance
-	var effective_radius: float = (base_pulse_radius * 0.6) * current_surface_resonance
+	var sprint_mult: float = 1.5 if is_sprinting else 1.0
+	var effective_radius: float = (base_footstep_noise_radius * sprint_mult) * current_surface_resonance
 	_dispatch_noise_event(step_global_pos, effective_intensity, effective_radius)
 
 
