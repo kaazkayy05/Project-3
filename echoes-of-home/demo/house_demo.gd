@@ -35,6 +35,9 @@ var feedback_sound: AudioStreamPlayer
 var previous_key_found := false
 var previous_bolt_unlocked := false
 var death_sound: AudioStreamPlayer
+var breath_vignette: ColorRect
+var breath_vignette_material: ShaderMaterial
+var breath_vignette_latched: bool = false
 
 func _ready() -> void:
 	acoustic = AcousticPulseSystem.new()
@@ -76,6 +79,7 @@ func _ready() -> void:
 	monster.bind_breath_system(breath_system, player)
 	monster.player_killed.connect(_on_player_killed)
 	environment_system.objectives_changed.connect(_sync_objectives)
+	_build_breath_vignette()
 	_build_hud()
 	_build_death_notification()
 	environment_system.escaped.connect(_on_escaped)
@@ -90,6 +94,32 @@ func _ready() -> void:
 	add_child(world)
 	if not MusicManager.music.playing:
 		MusicManager.music.play(0.0)
+
+
+func _build_breath_vignette() -> void:
+	var canvas := CanvasLayer.new()
+	canvas.name = "BreathVignette"
+	canvas.layer = 0 # Above the world, below the HUD (1), death (10), and pause (100).
+	add_child(canvas)
+	breath_vignette_material = ShaderMaterial.new()
+	breath_vignette_material.shader = preload("res://demo/shaders/breath_vignette.gdshader")
+	breath_vignette = ColorRect.new()
+	breath_vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	breath_vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	breath_vignette.material = breath_vignette_material
+	canvas.add_child(breath_vignette)
+
+
+func _update_breath_vignette() -> void:
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		breath_vignette_latched = false
+	elif is_instance_valid(breath_system):
+		if float(breath_system.get("lung_capacity")) == 0.0:
+			breath_vignette_latched = true
+	breath_vignette.visible = (
+		breath_vignette_latched and not game_over and not environment_system.has_escaped
+	)
+	breath_vignette_material.set_shader_parameter("lungs_empty", breath_vignette_latched)
 
 
 func _build_death_notification() -> void:
@@ -421,6 +451,9 @@ func _sync_objectives(_progress: Dictionary) -> void:
 
 
 func _on_gasp_triggered() -> void:
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT) \
+			and float(breath_system.get("lung_capacity")) == 0.0:
+		breath_vignette_latched = true
 	if not game_over and not environment_system.has_escaped:
 		acoustic.trigger_involuntary_gasp(player.global_position)
 
@@ -438,6 +471,15 @@ func _on_player_killed(_noise_origin: Vector3, _intensity: float) -> void:
 	death_sound.play()
 
 
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton \
+			and event.button_index == MOUSE_BUTTON_RIGHT \
+			and not event.pressed:
+		breath_vignette_latched = false
+		breath_vignette.hide()
+		breath_vignette_material.set_shader_parameter("lungs_empty", false)
+
+
 func _unhandled_input(event: InputEvent) -> void:
 	if environment_system.has_escaped and event is InputEventKey and event.pressed and not event.echo:
 		if event.physical_keycode == KEY_R:
@@ -451,6 +493,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_tree().reload_current_scene()
 
 func _process(delta: float) -> void:
+	_update_breath_vignette()
 	pulse_afterglow = 0.6 if acoustic.is_pulse_active else maxf(0.0, pulse_afterglow - delta)
 	for material in materials:
 		material.set_shader_parameter("pulse_origin", acoustic.pulse_origin)
