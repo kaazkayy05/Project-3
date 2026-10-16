@@ -56,7 +56,7 @@ func _ready() -> void:
 	breath_system.connect(&"gasp_triggered", Callable(self, "_on_gasp_triggered"))
 	monster = MONSTER_SCENE.instantiate() as MonsterAI
 	monster.name = "Monster"
-	monster.position = Vector3(4, 3.1, 0)
+	monster.position = Vector3(10, 3.1, -8)
 	add_child(monster)
 	monster.bind_acoustic_system(acoustic)
 	breath_system.bind_seam4_player(player)
@@ -72,8 +72,8 @@ func _ready() -> void:
 	world.environment = Environment.new()
 	world.environment.background_mode = Environment.BG_COLOR
 	world.environment.background_color = Color("0a0a0c")
-	world.environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
-	world.environment.ambient_light_energy = 0.0
+	world.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	world.environment.ambient_light_energy = 0.25; world.environment.ambient_light_color = Color("1a1e24")
 	world.environment.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	add_child(world)
 	if not MusicManager.music.playing:
