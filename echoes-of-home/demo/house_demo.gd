@@ -17,8 +17,15 @@ var key: StaticBody3D
 var front_door: StaticBody3D
 var bedroom_door: StaticBody3D
 var pulse_afterglow: float = 0.0
-var hud: Label
+var objective_label: Label
+var pulse_label: Label
+var controls_label: Label
+var breath_label: Label
+var breath_bar: ProgressBar
+var status_label: Label
 var game_over: bool = false
+var death_overlay: CanvasLayer
+var death_sound: AudioStreamPlayer
 
 func _ready() -> void:
 	acoustic = AcousticPulseSystem.new()
@@ -42,20 +49,25 @@ func _ready() -> void:
 	breath_system.set_script(BREATH_SYSTEM_SCRIPT)
 	add_child(breath_system)
 	player.breath_system = breath_system
+	player.sanity_breath = breath_system
+	breath_system.connect(
+		&"gasp_triggered", Callable(player, "on_player_gasp")
+	)
 	breath_system.connect(&"gasp_triggered", Callable(self, "_on_gasp_triggered"))
 	monster = MONSTER_SCENE.instantiate() as MonsterAI
 	monster.name = "Monster"
 	monster.position = Vector3(4, 3.1, 0)
 	add_child(monster)
 	monster.bind_acoustic_system(acoustic)
+	breath_system.bind_seam4_player(player)
+	monster.seam4_status_published.connect(
+		Callable(breath_system, "receive_monster_status")
+	)
 	monster.bind_breath_system(breath_system, player)
 	monster.player_killed.connect(_on_player_killed)
 	environment_system.objectives_changed.connect(_sync_objectives)
-	var canvas := CanvasLayer.new()
-	add_child(canvas)
-	hud = Label.new()
-	hud.position = Vector2(24, 20)
-	canvas.add_child(hud)
+	_build_hud()
+	_build_death_notification()
 	var world := WorldEnvironment.new()
 	world.environment = Environment.new()
 	world.environment.background_mode = Environment.BG_COLOR
@@ -64,6 +76,135 @@ func _ready() -> void:
 	world.environment.ambient_light_energy = 0.0
 	world.environment.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	add_child(world)
+	if not MusicManager.music.playing:
+		MusicManager.music.play(0.0)
+
+
+func _build_death_notification() -> void:
+	death_sound = AudioStreamPlayer.new()
+	var stream := preload("res://demo/audio/fail-sound.wav").duplicate() as AudioStreamWAV
+	stream.loop_mode = AudioStreamWAV.LOOP_DISABLED
+	death_sound.stream = stream
+	death_sound.volume_db = -10.0
+	death_sound.max_polyphony = 1
+	add_child(death_sound)
+
+	death_overlay = CanvasLayer.new()
+	death_overlay.layer = 10
+	add_child(death_overlay)
+
+	var shade := ColorRect.new()
+	shade.color = Color(0, 0, 0, 0.7)
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	death_overlay.add_child(shade)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shade.add_child(center)
+
+	var message := VBoxContainer.new()
+	message.add_theme_constant_override("separation", 16)
+	message.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	center.add_child(message)
+
+	var lines := [
+		["YOU DIED", 56],
+		["The Listener heard you.", 26],
+		["Press R to Restart.", 22],
+	]
+	for entry in lines:
+		var label := Label.new()
+		label.text = entry[0]
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.add_theme_font_size_override("font_size", entry[1])
+		label.add_theme_color_override("font_color", Color("#b97979"))
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		message.add_child(label)
+
+	death_overlay.hide()
+
+
+func _build_hud() -> void:
+	var canvas := CanvasLayer.new()
+	add_child(canvas)
+
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas.add_child(root)
+
+	objective_label = _make_hud_label(
+		root, Vector2(0, 0), Rect2(20, 20, 280, 110)
+	)
+	pulse_label = _make_hud_label(
+		root, Vector2(1, 0), Rect2(-200, 20, 180, 50),
+		HORIZONTAL_ALIGNMENT_RIGHT
+	)
+	controls_label = _make_hud_label(
+		root, Vector2(0.5, 0), Rect2(-320, 20, 640, 70),
+		HORIZONTAL_ALIGNMENT_CENTER
+	)
+	controls_label.add_theme_font_size_override("font_size", 14)
+	controls_label.text = (
+		"WASD — Move | Mouse — Look | Space — Echo | E — Interact\n"
+		+ "Shift — Sprint | Right Click — Hold Breath | Esc — Pause/Resume"
+	)
+
+	breath_label = _make_hud_label(
+		root, Vector2(0, 1), Rect2(20, -84, 240, 28)
+	)
+
+	breath_bar = ProgressBar.new()
+	breath_bar.anchor_top = 1.0
+	breath_bar.anchor_bottom = 1.0
+	breath_bar.offset_left = 20
+	breath_bar.offset_right = 260
+	breath_bar.offset_top = -48
+	breath_bar.offset_bottom = -28
+	breath_bar.min_value = 0
+	breath_bar.max_value = 100
+	breath_bar.show_percentage = false
+	breath_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var track := StyleBoxFlat.new()
+	track.bg_color = Color("#17171c")
+	breath_bar.add_theme_stylebox_override("background", track)
+
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = Color("#8c7777")
+	breath_bar.add_theme_stylebox_override("fill", fill)
+	root.add_child(breath_bar)
+
+	status_label = _make_hud_label(
+		root, Vector2(1, 1), Rect2(-260, -84, 240, 56),
+		HORIZONTAL_ALIGNMENT_RIGHT
+	)
+
+
+func _make_hud_label(
+		parent: Control, anchor: Vector2, bounds: Rect2,
+		alignment: int = HORIZONTAL_ALIGNMENT_LEFT) -> Label:
+	var label := Label.new()
+	label.anchor_left = anchor.x
+	label.anchor_right = anchor.x
+	label.anchor_top = anchor.y
+	label.anchor_bottom = anchor.y
+	label.offset_left = bounds.position.x
+	label.offset_top = bounds.position.y
+	label.offset_right = bounds.end.x
+	label.offset_bottom = bounds.end.y
+	label.horizontal_alignment = alignment
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.add_theme_font_size_override("font_size", 18)
+	label.add_theme_color_override("font_color", Color("#d8d3cc"))
+	label.add_theme_color_override("font_shadow_color", Color("#09090d"))
+	label.add_theme_constant_override("shadow_offset_x", 1)
+	label.add_theme_constant_override("shadow_offset_y", 1)
+	parent.add_child(label)
+	return label
 
 
 func _build_navigation() -> void:
@@ -234,13 +375,16 @@ func _on_gasp_triggered() -> void:
 
 
 func _on_player_killed(_noise_origin: Vector3, _intensity: float) -> void:
-	if game_over:
+	if game_over or environment_system.has_escaped:
 		return
 	game_over = true
+	MusicManager.music.stop()
 	player.set_controls_enabled(false)
 	breath_system.call("release_breath")
 	breath_system.set_process(false)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	death_overlay.show()
+	death_sound.play()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -255,16 +399,26 @@ func _process(delta: float) -> void:
 		material.set_shader_parameter("pulse_radius", acoustic.pulse_radius)
 		material.set_shader_parameter("pulse_active", pulse_afterglow > 0.0)
 		material.set_shader_parameter("fade", pulse_afterglow / 0.6)
-	hud.text = "ECHOES OF HOME\nWASD move | Mouse look | Space echo | E interact | Shift sprint | Left Ctrl hold breath | Esc pause/unpause\nPulses: %d / 5\n%s" % [acoustic.pulse_charges, player.message]
-	hud.text += "\n" + player.interaction_hint
+	objective_label.text = "OBJECTIVE\n" + player.message
+	if not player.interaction_hint.is_empty():
+		objective_label.text += "\n" + player.interaction_hint
+
+	pulse_label.text = "ECHO PULSES\n%d / %d" % [
+		acoustic.pulse_charges, acoustic.max_pulse_charges
+	]
+
 	if is_instance_valid(breath_system):
-		hud.text += "\nBreath: %.0f%% | Panic: %.0f%% | Heart: %d BPM" % [
-			float(breath_system.get("lung_capacity")),
+		var capacity := float(breath_system.get("lung_capacity"))
+		breath_label.text = "BREATH  %.0f%%" % capacity
+		breath_bar.value = capacity
+		status_label.text = "PANIC  %.0f%%\nHEART  %d BPM" % [
 			float(breath_system.get("panic_level")) * 100.0,
-			int(breath_system.get("heart_rate_bpm"))]
+			int(breath_system.get("heart_rate_bpm"))
+		]
+
 	if environment_system.freeze_resonance:
-		hud.text += "\nF6: resonance freeze ON (1.0)"
+		objective_label.text += "\nF6: resonance freeze ON (1.0)"
 	if game_over:
-		hud.text = "THE LISTENER HEARD YOU\nPress R to restart."
+		objective_label.text = "THE LISTENER HEARD YOU\nPress R to restart."
 	elif environment_system.has_escaped:
-		hud.text = "You escaped the house."
+		objective_label.text = "You escaped the house."
