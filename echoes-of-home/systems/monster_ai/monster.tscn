@@ -1,8 +1,13 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=20 format=3]
 
 [ext_resource type="Script" path="res://systems/monster_ai/monster_ai.gd" id="1_monster"]
 [ext_resource type="Script" path="res://systems/monster_ai/monster_echo_visual.gd" id="2_visual"]
 [ext_resource type="Shader" path="res://systems/monster_ai/monster_echo.gdshader" id="3_echo"]
+[ext_resource type="AudioStream" path="res://demo/audio/footsteps.wav" id="4_warning"]
+[ext_resource type="Script" path="res://systems/monster_ai/monster_presentation.gd" id="5_presentation"]
+[ext_resource type="Shader" path="res://systems/monster_ai/monster_body.gdshader" id="6_body"]
+[ext_resource type="Script" path="res://systems/monster_ai/monster_jumpscare.gd" id="7_jumpscare"]
+[ext_resource type="AudioStream" path="res://demo/audio/fail-sound.wav" id="8_sting"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_monster"]
 radius = 0.3
@@ -39,6 +44,38 @@ height = 0.8
 radial_segments = 10
 rings = 4
 
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_body"]
+resource_local_to_scene = true
+shader = ExtResource("6_body")
+shader_parameter/shadow_color = Color(0.045, 0.055, 0.075, 1)
+shader_parameter/rim_color = Color(0.28, 0.38, 0.45, 1)
+shader_parameter/threat = 0.0
+shader_parameter/opacity = 0.96
+shader_parameter/flicker_amount = 0.18
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_ghost"]
+resource_local_to_scene = true
+shader = ExtResource("6_body")
+shader_parameter/shadow_color = Color(0.015, 0.02, 0.032, 1)
+shader_parameter/rim_color = Color(0.26, 0.42, 0.5, 1)
+shader_parameter/threat = 0.1
+shader_parameter/opacity = 0.16
+shader_parameter/flicker_amount = 0.5
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_eyes"]
+shading_mode = 0
+albedo_color = Color(0.92, 0.055, 0.025, 1)
+emission_enabled = true
+emission = Color(1, 0.035, 0.012, 1)
+emission_energy_multiplier = 5.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mouth"]
+shading_mode = 0
+albedo_color = Color(0.12, 0.003, 0.003, 1)
+emission_enabled = true
+emission = Color(0.28, 0.005, 0.005, 1)
+emission_energy_multiplier = 1.8
+
 [node name="Monster" type="CharacterBody3D"]
 script = ExtResource("1_monster")
 use_house_patrol_route = true
@@ -52,6 +89,144 @@ path_desired_distance = 0.25
 target_desired_distance = 0.25
 radius = 0.3
 height = 1.7
+
+[node name="ApproachWarning" type="AudioStreamPlayer3D" parent="."]
+stream = ExtResource("4_warning")
+volume_db = -8.0
+max_distance = 12.0
+
+[node name="PhysicalVisual" type="Node3D" parent="."]
+script = ExtResource("5_presentation")
+body_material = SubResource("ShaderMaterial_body")
+
+[node name="BodyRoot" type="Node3D" parent="PhysicalVisual"]
+
+[node name="Torso" type="MeshInstance3D" parent="PhysicalVisual/BodyRoot"]
+position = Vector3(0, 1.14, 0)
+scale = Vector3(0.92, 1.28, 0.72)
+material_override = SubResource("ShaderMaterial_body")
+mesh = SubResource("BoxMesh_torso")
+
+[node name="Head" type="MeshInstance3D" parent="PhysicalVisual/BodyRoot"]
+position = Vector3(0, 1.78, -0.015)
+scale = Vector3(1.32, 1.62, 0.9)
+material_override = SubResource("ShaderMaterial_body")
+mesh = SubResource("SphereMesh_head")
+
+[node name="HeadAura" type="MeshInstance3D" parent="PhysicalVisual/BodyRoot/Head"]
+scale = Vector3(1.12, 1.08, 1.18)
+material_override = SubResource("ShaderMaterial_ghost")
+mesh = SubResource("SphereMesh_head")
+
+[node name="Jaw" type="MeshInstance3D" parent="PhysicalVisual/BodyRoot"]
+position = Vector3(0, 1.53, -0.13)
+scale = Vector3(0.58, 0.13, 0.32)
+material_override = SubResource("StandardMaterial3D_mouth")
+mesh = SubResource("BoxMesh_torso")
+
+[node name="LeftArm" type="MeshInstance3D" parent="PhysicalVisual/BodyRoot"]
+position = Vector3(-0.39, 0.98, 0)
+rotation = Vector3(0.04, 0, -0.2)
+scale = Vector3(0.82, 1.55, 0.82)
+material_override = SubResource("ShaderMaterial_body")
+mesh = SubResource("CapsuleMesh_arm")
+
+[node name="RightArm" type="MeshInstance3D" parent="PhysicalVisual/BodyRoot"]
+position = Vector3(0.39, 0.98, 0)
+rotation = Vector3(-0.04, 0, 0.2)
+scale = Vector3(0.82, 1.55, 0.82)
+material_override = SubResource("ShaderMaterial_body")
+mesh = SubResource("CapsuleMesh_arm")
+
+[node name="LeftLeg" type="MeshInstance3D" parent="PhysicalVisual/BodyRoot"]
+position = Vector3(-0.14, 0.36, 0)
+rotation = Vector3(0, 0, -0.035)
+scale = Vector3(0.95, 1.28, 0.95)
+material_override = SubResource("ShaderMaterial_body")
+mesh = SubResource("CapsuleMesh_leg")
+
+[node name="RightLeg" type="MeshInstance3D" parent="PhysicalVisual/BodyRoot"]
+position = Vector3(0.14, 0.36, 0)
+rotation = Vector3(0, 0, 0.035)
+scale = Vector3(0.95, 1.28, 0.95)
+material_override = SubResource("ShaderMaterial_body")
+mesh = SubResource("CapsuleMesh_leg")
+
+[node name="Eyes" type="Node3D" parent="PhysicalVisual/BodyRoot"]
+
+[node name="LeftEye" type="MeshInstance3D" parent="PhysicalVisual/BodyRoot/Eyes"]
+position = Vector3(-0.095, 1.82, -0.16)
+scale = Vector3(0.28, 0.18, 0.13)
+material_override = SubResource("StandardMaterial3D_eyes")
+mesh = SubResource("SphereMesh_head")
+
+[node name="RightEye" type="MeshInstance3D" parent="PhysicalVisual/BodyRoot/Eyes"]
+position = Vector3(0.095, 1.82, -0.16)
+scale = Vector3(0.28, 0.18, 0.13)
+material_override = SubResource("StandardMaterial3D_eyes")
+mesh = SubResource("SphereMesh_head")
+
+[node name="Jumpscare" type="Node" parent="."]
+script = ExtResource("7_jumpscare")
+
+[node name="ScareRig" type="Node3D" parent="Jumpscare"]
+visible = false
+
+[node name="Face" type="MeshInstance3D" parent="Jumpscare/ScareRig"]
+scale = Vector3(2.2, 2.8, 1.8)
+material_override = SubResource("ShaderMaterial_body")
+mesh = SubResource("SphereMesh_head")
+
+[node name="Mouth" type="MeshInstance3D" parent="Jumpscare/ScareRig"]
+position = Vector3(0, -0.23, 0.31)
+scale = Vector3(1.15, 0.32, 0.18)
+material_override = SubResource("StandardMaterial3D_mouth")
+mesh = SubResource("BoxMesh_torso")
+
+[node name="LeftEye" type="MeshInstance3D" parent="Jumpscare/ScareRig"]
+position = Vector3(-0.17, 0.11, 0.32)
+scale = Vector3(0.48, 0.3, 0.2)
+material_override = SubResource("StandardMaterial3D_eyes")
+mesh = SubResource("SphereMesh_head")
+
+[node name="RightEye" type="MeshInstance3D" parent="Jumpscare/ScareRig"]
+position = Vector3(0.17, 0.11, 0.32)
+scale = Vector3(0.48, 0.3, 0.2)
+material_override = SubResource("StandardMaterial3D_eyes")
+mesh = SubResource("SphereMesh_head")
+
+[node name="LeftHand" type="MeshInstance3D" parent="Jumpscare/ScareRig"]
+position = Vector3(-0.48, -0.11, 0.08)
+rotation = Vector3(1.25, 0.1, -0.22)
+scale = Vector3(1.15, 1.5, 1.15)
+material_override = SubResource("ShaderMaterial_body")
+mesh = SubResource("CapsuleMesh_arm")
+
+[node name="RightHand" type="MeshInstance3D" parent="Jumpscare/ScareRig"]
+position = Vector3(0.48, -0.11, 0.08)
+rotation = Vector3(1.25, -0.1, 0.22)
+scale = Vector3(1.15, 1.5, 1.15)
+material_override = SubResource("ShaderMaterial_body")
+mesh = SubResource("CapsuleMesh_arm")
+
+[node name="ScreenFlash" type="CanvasLayer" parent="Jumpscare"]
+layer = 50
+
+[node name="ColorRect" type="ColorRect" parent="Jumpscare/ScreenFlash"]
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.58, 0.015, 0.01, 0.34)
+
+[node name="Sting" type="AudioStreamPlayer" parent="Jumpscare"]
+stream = ExtResource("8_sting")
+volume_db = -2.0
+pitch_scale = 0.82
+max_polyphony = 1
 
 [node name="EchoVisual" type="Node3D" parent="."]
 visible = false

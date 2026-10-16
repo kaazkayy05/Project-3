@@ -20,12 +20,17 @@ enum State {
 @export var hearing_threshold: float = 0.3
 @export var full_aggro_intensity: float = 1.5
 @export_range(0.0, 1.0) var hunting_aggro_threshold: float = 0.85
+@export var target_update_cooldown: float = 1.5
+@export var breathing_noise_intensity: float = 0.35
+@export var breathing_hearing_radius: float = 3.5
+@export var breathing_detection_interval: float = 0.75
 
 @export_group("Investigation")
 @export var investigation_duration: float = 2.5
+@export var pursuit_timeout: float = 6.0
 @export var arrival_tolerance: float = 0.25
-@export var investigation_speed: float = 2.0
-@export var hunting_speed: float = 5.0
+@export var investigation_speed: float = 3.0
+@export var hunting_speed: float = 4.5
 
 @export_group("Patrol and Movement")
 @export var use_house_patrol_route: bool = false
@@ -38,6 +43,10 @@ enum State {
 @export var kill_proximity_distance: float = 2.0
 @export var player_noise_origin_tolerance: float = 0.5
 
+@export_group("Player Warning")
+@export var approach_warning_distance: float = 9.0
+@export var approach_warning_interval: float = 0.8
+
 @export_group("Seams")
 @export var acoustic_system: AcousticPulseSystem
 
@@ -49,14 +58,21 @@ var kill_proximity_active: bool = false
 var patrol_points: Array[Vector3] = []
 
 var _investigation_time_remaining: float = 0.0
+var _pursuit_time_remaining: float = 0.0
+var _target_update_time_remaining: float = 0.0
+var _breathing_detection_time_remaining: float = 0.0
+var _approach_warning_time_remaining: float = 0.0
 var _patrol_index: int = 0
 var _patrol_time_remaining: float = 0.0
 var _navigation_target: Vector3 = Vector3.INF
 var _breath_system: Node
+var _breath_state_available: bool = false
 var _seam4_player: Node3D
 var _player_killed: bool = false
 
 @onready var navigation_agent: NavigationAgent3D = get_node_or_null("NavigationAgent3D")
+@onready var approach_warning: AudioStreamPlayer3D = get_node_or_null("ApproachWarning")
+@onready var jumpscare: MonsterJumpscare = get_node_or_null("Jumpscare")
 
 ## World-space points chosen from the current fixed house blockout. The route
 ## passes through the central kitchen opening, approaches the east stair, climbs
@@ -82,7 +98,11 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	_update_target_cooldown(delta)
 	_update_investigation_wait(delta)
+	_update_pursuit_timeout(delta)
+	_update_breathing_detection(delta)
+	_update_approach_warning(delta)
 
 
 func _physics_process(delta: float) -> void:
@@ -120,12 +140,19 @@ func bind_breath_system(system: Node, player: Node3D) -> bool:
 
 	_breath_system = system
 	_seam4_player = player
+	_breath_state_available = _node_has_property(system, &"is_holding_breath")
+	if not _breath_state_available:
+		push_warning(
+			"Breathing detection requires the existing is_holding_breath property. "
+			+ "Distance publishing will continue without passive breath detection."
+		)
 	publish_seam4_status()
 	return true
 
 
 func clear_breath_system_binding() -> void:
 	_breath_system = null
+	_breath_state_available = false
 	_seam4_player = null
 
 
@@ -140,6 +167,14 @@ func get_monster_state() -> State:
 
 func has_killed_player() -> bool:
 	return _player_killed
+
+
+func is_jumpscare_active() -> bool:
+	return is_instance_valid(jumpscare) and jumpscare.is_active()
+
+
+func get_jumpscare_duration() -> float:
+	return jumpscare.get_duration() if is_instance_valid(jumpscare) else 0.0
 
 
 ## Publishes a consistent position/state snapshot and pushes only distance into
@@ -160,6 +195,8 @@ func publish_seam4_status() -> void:
 
 func reset_to_default() -> void:
 	_investigation_time_remaining = 0.0
+	_pursuit_time_remaining = 0.0
+	_target_update_time_remaining = 0.0
 	aggro_level = 0.0
 	if patrol_points.is_empty():
 		current_speed = 0.0
@@ -205,28 +242,54 @@ func _connect_acoustic_system() -> void:
 func _on_noise_emitted(origin: Vector3, intensity: float, radius: float) -> void:
 	if _player_killed:
 		return
-	if _should_kill_from_player_noise(origin, intensity, radius):
-		_kill_player(origin, intensity)
-		return
 	if not _is_noise_audible(origin, intensity, radius):
 		return
 
-	# The event origin is copied at emission time. The monster deliberately does
-	# not track the player's later position while investigating this sound.
+	_respond_to_detected_noise(origin, intensity)
+	if _should_kill_from_player_noise(origin, intensity, radius):
+		_kill_player(origin, intensity)
+
+
+## Responds to a snapshot of a sound instead of tracking its source. Repeated
+## footsteps can refresh this target only after the cooldown, while a sound
+## strong enough to escalate an investigation to a hunt is accepted at once.
+func _respond_to_detected_noise(origin: Vector3, intensity: float) -> bool:
+	var noise_aggro := _aggression_from_intensity(intensity)
+	var escalates_to_hunt := noise_aggro >= hunting_aggro_threshold
+	var can_update_target := (
+		monster_state == State.DORMANT
+		or monster_state == State.STALKING
+		or is_zero_approx(_target_update_time_remaining)
+		or intensity >= full_aggro_intensity
+		or (monster_state == State.INVESTIGATING and escalates_to_hunt)
+	)
+	if not can_update_target:
+		return false
+
+	# Copy the event origin. Nothing in the movement loop replaces it with the
+	# player's live position, so a player who becomes quiet can break pursuit.
 	investigation_target = origin
-	aggro_level = _aggression_from_intensity(intensity)
-	current_speed = lerpf(investigation_speed, hunting_speed, aggro_level)
+	aggro_level = noise_aggro
+	_target_update_time_remaining = target_update_cooldown
 	_investigation_time_remaining = investigation_duration
 	_set_navigation_target(investigation_target)
 
-	if aggro_level >= hunting_aggro_threshold:
+	if monster_state == State.HUNTING or escalates_to_hunt:
+		current_speed = hunting_speed
+		_pursuit_time_remaining = pursuit_timeout
 		_set_state(State.HUNTING)
 	else:
+		current_speed = investigation_speed
 		_set_state(State.INVESTIGATING)
+	return true
 
 
 func _should_kill_from_player_noise(origin: Vector3, intensity: float, radius: float) -> bool:
-	if not is_instance_valid(_seam4_player) or intensity <= 0.0 or radius <= 0.0:
+	if not is_instance_valid(_seam4_player):
+		return false
+	if monster_state != State.HUNTING:
+		return false
+	if not _is_noise_audible(origin, intensity, radius):
 		return false
 
 	# Seam 1 currently carries no source identifier. All production acoustic
@@ -248,6 +311,8 @@ func _kill_player(noise_origin: Vector3, intensity: float) -> void:
 	_player_killed = true
 	current_speed = 0.0
 	velocity = Vector3.ZERO
+	if is_instance_valid(jumpscare):
+		jumpscare.play(_seam4_player)
 	player_killed.emit(noise_origin, intensity)
 
 
@@ -267,8 +332,14 @@ func _aggression_from_intensity(intensity: float) -> float:
 	)
 
 
+func _update_target_cooldown(delta: float) -> void:
+	_target_update_time_remaining = maxf(
+		0.0, _target_update_time_remaining - delta
+	)
+
+
 func _update_investigation_wait(delta: float) -> void:
-	if monster_state != State.INVESTIGATING and monster_state != State.HUNTING:
+	if monster_state != State.INVESTIGATING:
 		return
 	if global_position.distance_to(investigation_target) > arrival_tolerance:
 		return
@@ -276,6 +347,92 @@ func _update_investigation_wait(delta: float) -> void:
 	_investigation_time_remaining = maxf(0.0, _investigation_time_remaining - delta)
 	if is_zero_approx(_investigation_time_remaining):
 		reset_to_default()
+
+
+## Hunting has a hard lifetime. On expiry the monster searches the last accepted
+## sound position at normal speed, then the regular investigation timer returns
+## it to its patrol route (or DORMANT when no route exists).
+func _update_pursuit_timeout(delta: float) -> void:
+	if monster_state != State.HUNTING:
+		return
+	_pursuit_time_remaining = maxf(0.0, _pursuit_time_remaining - delta)
+	if not is_zero_approx(_pursuit_time_remaining):
+		return
+
+	aggro_level = 0.0
+	current_speed = investigation_speed
+	_investigation_time_remaining = investigation_duration
+	_set_navigation_target(investigation_target)
+	_set_state(State.INVESTIGATING)
+
+
+## The breath system owns the actual held/released state. Monster AI only reads
+## that existing property and treats normal breathing as a short-range sound.
+## Acoustic signal events never pass through this check, so holding breath does
+## not hide footsteps, pulses, creaks, or gasps.
+func _update_breathing_detection(delta: float) -> void:
+	_breathing_detection_time_remaining = maxf(
+		0.0, _breathing_detection_time_remaining - delta
+	)
+	if not is_zero_approx(_breathing_detection_time_remaining):
+		return
+	_breathing_detection_time_remaining = breathing_detection_interval
+	if not _can_hear_player_breathing():
+		return
+	_respond_to_detected_noise(
+		_seam4_player.global_position, breathing_noise_intensity
+	)
+
+
+func _can_hear_player_breathing() -> bool:
+	if not is_instance_valid(_breath_system) or not is_instance_valid(_seam4_player):
+		return false
+	if not _breath_state_available or is_player_holding_breath():
+		return false
+	return _is_noise_audible(
+		_seam4_player.global_position,
+		breathing_noise_intensity,
+		breathing_hearing_radius
+	)
+
+
+func is_player_holding_breath() -> bool:
+	if not is_instance_valid(_breath_system) or not _breath_state_available:
+		return false
+	return bool(_breath_system.get("is_holding_breath"))
+
+
+func _node_has_property(node: Node, property_name: StringName) -> bool:
+	for property in node.get_property_list():
+		if StringName(property.name) == property_name:
+			return true
+	return false
+
+
+## A spatialized reuse of the existing footstep asset gives players an audible
+## warning when an active monster is moving nearby without revealing it globally.
+func _update_approach_warning(delta: float) -> void:
+	if not is_instance_valid(approach_warning):
+		return
+	var should_warn := (
+		not _player_killed
+		and monster_state != State.DORMANT
+		and is_instance_valid(_seam4_player)
+		and global_position.distance_to(_seam4_player.global_position)
+			<= approach_warning_distance
+		and Vector2(velocity.x, velocity.z).length() > 0.05
+	)
+	if not should_warn:
+		approach_warning.stop()
+		_approach_warning_time_remaining = 0.0
+		return
+
+	_approach_warning_time_remaining = maxf(
+		0.0, _approach_warning_time_remaining - delta
+	)
+	if is_zero_approx(_approach_warning_time_remaining) and not approach_warning.playing:
+		approach_warning.play()
+		_approach_warning_time_remaining = approach_warning_interval
 
 
 func _update_patrol(delta: float) -> void:
